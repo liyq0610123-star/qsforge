@@ -17,11 +17,14 @@ Score Dimensions (total 100%):
 Run: python module1_qs_readiness.py <path_to_module0_output_excel>
 """
 
+import logging
 import pandas as pd
 import numpy as np
 import sys
 import os
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────
 # CONFIG
@@ -136,21 +139,21 @@ COL_DQ         = "Data_Quality"
 # ─────────────────────────────────────────────
 
 def load_module0(filepath):
-    print(f"\n{'='*60}")
-    print(f"Loading Module 0 output: {os.path.basename(filepath)}")
-    print(f"{'='*60}")
+    logger.info(f"\n{'='*60}")
+    logger.info(f"Loading Module 0 output: {os.path.basename(filepath)}")
+    logger.info(f"{'='*60}")
 
     df = pd.read_excel(filepath, sheet_name="QS Element List")
-    print(f"QS elements loaded: {len(df):,}")
-    print(f"Categories: {sorted(df[COL_CATEGORY].unique())}")
+    logger.info(f"QS elements loaded: {len(df):,}")
+    logger.info(f"Categories: {sorted(df[COL_CATEGORY].unique())}")
 
     # Load Non-QS Elements sheet if present
     try:
         non_qs_df = pd.read_excel(filepath, sheet_name="Non-QS Elements")
-        print(f"Non-QS elements loaded: {len(non_qs_df):,}")
+        logger.info(f"Non-QS elements loaded: {len(non_qs_df):,}")
     except Exception:
         non_qs_df = None
-        print("  Non-QS Elements sheet not found — Non-QS Family check skipped")
+        logger.warning("  Non-QS Elements sheet not found — Non-QS Family check skipped")
 
     return df, non_qs_df
 
@@ -253,7 +256,7 @@ def check_material_completeness(df):
     coverage = n_valid / total if total > 0 else 0
     score    = round(coverage * 100, 1)
 
-    print(f"\n  Material breakdown — "
+    logger.info(f"\n  Material breakdown — "
           f"Valid: {n_valid} | Unclassified: {n_unclass} | Missing: {n_missing}")
 
     # Issues: Missing (error) + Unclassified (warning)
@@ -523,11 +526,11 @@ def export(scorecard, issues_df, input_path):
         scorecard.to_excel(writer, sheet_name="QS Readiness Score", index=False)
         issues_df.to_excel(writer, sheet_name="Issues Detail",      index=False)
 
-    print(f"\n{'='*60}")
-    print(f"Output saved: {out_path}")
-    print(f"  Sheet 1 — QS Readiness Score: {len(scorecard)} dimensions")
-    print(f"  Sheet 2 — Issues Detail:      {len(issues_df):,} issues")
-    print(f"{'='*60}\n")
+    logger.info(f"\n{'='*60}")
+    logger.info(f"Output saved: {out_path}")
+    logger.info(f"  Sheet 1 — QS Readiness Score: {len(scorecard)} dimensions")
+    logger.info(f"  Sheet 2 — Issues Detail:      {len(issues_df):,} issues")
+    logger.info(f"{'='*60}\n")
     return out_path
 
 
@@ -537,18 +540,18 @@ def export(scorecard, issues_df, input_path):
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python module1_qs_readiness.py <path_to_module0_excel>")
+        logger.error("Usage: python module1_qs_readiness.py <path_to_module0_excel>")
         sys.exit(1)
 
     filepath = sys.argv[1]
     if not os.path.exists(filepath):
-        print(f"File not found: {filepath}")
+        logger.error(f"File not found: {filepath}")
         sys.exit(1)
 
     df, non_qs_df = load_module0(filepath)
     sorted_levels, level_index = build_level_order(df)
 
-    print(f"\nLevel order detected: {sorted_levels}")
+    logger.info(f"\nLevel order detected: {sorted_levels}")
 
     # Run all dimensions
     results = {}
@@ -578,16 +581,16 @@ def main():
     overall = compute_score(results)
 
     # Print summary
-    print(f"\n{'='*60}")
-    print(f"QS READINESS SCORE SUMMARY")
-    print(f"{'='*60}")
+    logger.info(f"\n{'='*60}")
+    logger.info(f"QS READINESS SCORE SUMMARY")
+    logger.info(f"{'='*60}")
     for dim, data in results.items():
         s = data["score"]
         label = score_label(s) if s is not None else "N/A"
-        print(f"  {dim:<30} {str(s):>6}%   {label}  ({len(data['issues'])} issues)")
-    print(f"{'='*60}")
-    print(f"  {'OVERALL':.<30} {overall:>6}%   {score_label(overall)}")
-    print(f"{'='*60}\n")
+        logger.info(f"  {dim:<30} {str(s):>6}%   {label}  ({len(data['issues'])} issues)")
+    logger.info(f"{'='*60}")
+    logger.info(f"  {'OVERALL':.<30} {overall:>6}%   {score_label(overall)}")
+    logger.info(f"{'='*60}\n")
 
     # Build and export
     scorecard = build_scorecard(results, overall)
