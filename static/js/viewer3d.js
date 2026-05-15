@@ -1,22 +1,25 @@
 /**
  * QSForge — Viewer3D
  *
- * Encapsulates a three.js scene that renders a DDC-produced COLLADA file
- * and overlays Module 1 quality issues on top of the geometry.
+ * Encapsulates a three.js scene that renders a glTF (GLB) file produced by
+ * the server-side trimesh DAE→GLB conversion (see
+ * src/module3_3d_preview.py::_convert_dae_to_glb) and overlays Module 1
+ * quality issues on top of the geometry.
  *
  * Lifecycle
  * ---------
  *   const v = new Viewer3D(containerEl);
- *   await v.load(daeUrl, resultData);   // parses + paints + zooms-to-fit
+ *   await v.load(glbUrl, resultData);    // parses + paints + zooms-to-fit
  *   v.setColorMode('status' | 'category' | 'family' | 'single');
  *   v.toggleSeverity('CRITICAL', false);
  *   v.dispose();                         // tear down on tab change / new analysis
  *
  * Element ID join
  * ---------------
- *   COLLADA <node name="1890568"> → THREE.Mesh.name = "1890568"
+ *   DAE <node name="1890568">  →  trimesh GLB node.name = "1890568"
+ *                              →  GLTFLoader Object3D.name = "1890568"
  *   We walk the loaded scene once and build:
- *     this.elementMap = { "1890568": { mesh, originalMaterial }, ... }
+ *     this.elementMap = { "1890568": { mesh, originalMaterial, ... }, ... }
  *
  * Picking
  * -------
@@ -25,7 +28,7 @@
  *   callback.
  */
 import * as THREE from '/static/vendor/three/three.module.min.js';
-import { ColladaLoader } from '/static/vendor/three/ColladaLoader.js';
+import { GLTFLoader } from '/static/vendor/three/GLTFLoader.js';
 import { OrbitControls } from '/static/vendor/three/OrbitControls.js';
 
 const SEVERITY_COLORS = {
@@ -365,49 +368,19 @@ export class Viewer3D {
     return this.elementMap[String(id)] || null;
   }
 
-  async load(daeUrl, resultData) {
-    const loader = new ColladaLoader();
+  async load(glbUrl, resultData) {
+    const loader = new GLTFLoader();
     return new Promise((resolve, reject) => {
       loader.load(
-        daeUrl,
-        (collada) => {
+        glbUrl,
+        (gltf) => {
           try {
-            this.modelGroup.add(collada.scene);
-
-            // CRITICAL: bake every mesh's accumulated world transform into
-            // its geometry, then **reparent the mesh directly to
-            // modelGroup**, abandoning ColladaLoader's hierarchy entirely.
-            //
-            // Why both steps are needed: ColladaLoader puts the unit scale
-            // (×0.001 for mm) and the Z-up→Y-up rotation on ANCESTOR groups
-            // above the meshes. If we only bake transforms into the geometry
-            // but leave the mesh as a child of those scaled groups, the
-            // parent's scale gets applied AGAIN at render time, shrinking
-            // the model by 1000×. Reparenting to a plain group breaks that
-            // chain — each mesh is now self-contained.
-            collada.scene.updateMatrixWorld(true);
-            const meshesToReparent = [];
-            collada.scene.traverse((obj) => {
-              if (obj.isMesh && obj.geometry) {
-                meshesToReparent.push(obj);
-              }
-            });
-            // ColladaLoader uses <instance_geometry>: many Meshes share the
-            // SAME BufferGeometry instance. We MUST clone before applying a
-            // per-mesh matrix, otherwise the same geometry gets transformed
-            // N times (once per mesh that references it), leaving every
-            // triangle multiply-transformed and rendering as garbage.
-            for (const mesh of meshesToReparent) {
-              mesh.geometry = mesh.geometry.clone();
-              mesh.geometry.applyMatrix4(mesh.matrixWorld);
-              mesh.position.set(0, 0, 0);
-              mesh.rotation.set(0, 0, 0);
-              mesh.scale.set(1, 1, 1);
-              mesh.matrix.identity();
-              if (mesh.parent) mesh.parent.remove(mesh);
-              this.modelGroup.add(mesh);
-            }
-            this.modelGroup.remove(collada.scene);
+            // glTF scenes are Y-up by spec — no manual reparenting / matrix
+            // baking is needed (ColladaLoader required that hack because it
+            // put unit-scale and Z-up→Y-up rotation on ancestor groups, which
+            // got applied twice at render time). GLTFLoader hands us a scene
+            // we can drop straight into modelGroup.
+            this.modelGroup.add(gltf.scene);
             this.modelGroup.updateMatrixWorld(true);
 
             // DIAGNOSTIC PASS: count what's actually in the scene by type,
