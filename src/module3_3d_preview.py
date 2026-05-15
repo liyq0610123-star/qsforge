@@ -219,6 +219,40 @@ def _convert_dae_to_glb(dae_path: Path) -> Path:
             f"trimesh failed to load DAE {dae_path.name}: {e}"
         ) from e
 
+    # Re-bind Revit element IDs from the source DAE onto scene geometries.
+    # trimesh's default DAE loader auto-suffixes geometry keys (cube_geom,
+    # cube_geom_1, ...) and discards <node name="..."> values. We walk the
+    # DAE once with ElementTree, pull each visual_scene <node>'s name (or
+    # its id if name is the literal "node" placeholder DDC sometimes emits),
+    # and rename scene.geometry keys in declaration order so the resulting
+    # GLB carries the Revit element IDs.
+    try:
+        import xml.etree.ElementTree as _ET
+        _ns = {"c": "http://www.collada.org/2005/11/COLLADASchema"}
+        tree = _ET.parse(str(dae_path))
+        node_names: list[str] = []
+        for n in tree.getroot().findall(".//c:visual_scene//c:node", _ns):
+            name = (n.get("name") or "").strip()
+            if not name or name == "node":
+                # Fall back to id attribute (strip any "element_" prefix DDC uses).
+                raw_id = (n.get("id") or "").strip()
+                if raw_id.startswith("element_"):
+                    raw_id = raw_id[len("element_"):]
+                name = raw_id
+            if name:
+                node_names.append(name)
+
+        geom_keys = list(scene.geometry.keys())
+        for idx, key in enumerate(geom_keys):
+            if idx < len(node_names) and node_names[idx] and node_names[idx] != key:
+                # Move the geometry under its new key. Skip on collision —
+                # we'd rather keep the first occurrence than corrupt the scene.
+                new_key = node_names[idx]
+                if new_key not in scene.geometry:
+                    scene.geometry[new_key] = scene.geometry.pop(key)
+    except Exception as e:
+        _log.warning("Could not re-bind DAE node names onto GLB: %s", e)
+
     try:
         glb_bytes = scene.export(file_type="glb")
     except Exception as e:

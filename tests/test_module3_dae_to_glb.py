@@ -22,3 +22,30 @@ def test_convert_dae_to_glb_produces_a_file(fixtures_dir, tmp_path):
     assert glb.stat().st_size > 0
     # GLB binary format starts with the magic "glTF" (0x46546C67 little-endian).
     assert glb.read_bytes()[:4] == b"glTF"
+
+
+def test_convert_preserves_element_id_node_names(fixtures_dir, tmp_path):
+    """Numeric node names in the DAE must survive into the GLB scene graph."""
+    import trimesh
+
+    src = fixtures_dir / "tiny_with_geom.dae"
+    dae = tmp_path / "tiny_with_geom.dae"
+    dae.write_bytes(src.read_bytes())
+
+    glb = m3._convert_dae_to_glb(dae)
+
+    # Re-parse the GLB and collect every named node/geometry in the scene.
+    reloaded = trimesh.load(str(glb), force="scene")
+    names = set()
+    # In trimesh's Scene model, geometry names and graph node names both
+    # surface as keys/labels. Collect both to be format-tolerant.
+    names.update(reloaded.geometry.keys())
+    if hasattr(reloaded, "graph"):
+        names.update(reloaded.graph.nodes)
+
+    expected_ids = {"1890568", "1890569", "1890570"}
+    matched = expected_ids & names
+    assert matched, (
+        f"None of the expected element IDs {expected_ids} survived. "
+        f"GLB names: {sorted(names)}"
+    )
