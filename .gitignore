@@ -1,0 +1,46 @@
+# ── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Virtualenvs ─────────────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+ENV/
+
+# ── Build outputs ───────────────────────────────────────────────────────────
+build/
+dist/
+installer/output/
+installer/version.iss
+*.spec.bak
+build_log*.txt
+
+# ── Runtime droppings (next to the EXE in frozen builds) ────────────────────
+.webview-data/
+last_result.json
+qsforge_crash.log
+qsforge_rvtexporter_last.txt
+archiqs_crash.log
+archiqs_rvtexporter_last.txt
+*.log
+
+# ── Test fixtures too large for GitHub (>100 MB hard limit) ─────────────────
+tests/*.rvt
+tests/last_result.json
+
+# ── Cleanup staging ─────────────────────────────────────────────────────────
+_to_delete/
+
+# ── IDE / OS ────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.cursorrules
+.superpowers/
+.DS_Store
+Thumbs.db
+desktop.ini
