@@ -23,8 +23,40 @@ import webview
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-import server
 import paths as app_paths
+import logging
+from logging.handlers import RotatingFileHandler
+
+
+def _setup_logging() -> None:
+    """Install a rotating file handler so production builds capture diagnostics.
+
+    Frozen QSForge has no console — print() output is silently lost. This
+    handler writes to %LOCALAPPDATA%\\QSForge\\qsforge.log (or the source
+    project folder in dev). 5 MB cap × 3 backups = bounded disk use.
+    """
+    log_path = app_paths.user_data_dir() / "qsforge.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    handler = RotatingFileHandler(
+        log_path,
+        maxBytes=5 * 1024 * 1024,
+        backupCount=3,
+        encoding="utf-8",
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    )
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    # Don't duplicate handlers across re-imports (relevant if main.py is
+    # invoked multiple times in a single Python process, e.g. tests).
+    if not any(isinstance(h, RotatingFileHandler) for h in root.handlers):
+        root.addHandler(handler)
+
+
+_setup_logging()
+
+import server
 
 
 # Stable AppUserModelID so Windows taskbar groups our window under "QSForge"
