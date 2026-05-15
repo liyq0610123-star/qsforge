@@ -131,8 +131,12 @@ def _reset_webview_cache():
 WINDOW_TITLE = "QSForge — Revit Model Quality Check"
 WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = 820
-HEALTH_URL = f"http://{server.HOST}:{server.PORT}/api/health"
-APP_URL = f"http://{server.HOST}:{server.PORT}/"
+def _health_url() -> str:
+    return f"http://{server.HOST}:{server.PORT}/api/health"
+
+
+def _app_url() -> str:
+    return f"http://{server.HOST}:{server.PORT}/"
 
 
 # ── Windows-native icon + taskbar grouping ──────────────────────────────────
@@ -349,18 +353,25 @@ def start_server():
 
 
 def wait_for_server(timeout=15.0):
-    """Ping /api/health until it responds or timeout elapses."""
+    """Ping /api/health until it responds or timeout elapses.
+
+    Resilient to the brief startup window where the server is still
+    picking a port — we re-evaluate the health URL on every loop so a
+    fallback port (7891+) is picked up correctly.
+    """
     deadline = time.time() + timeout
-    last_err = None
+    last_err: Exception | None = None
     while time.time() < deadline:
         try:
-            with urllib.request.urlopen(HEALTH_URL, timeout=1.0) as resp:
+            with urllib.request.urlopen(_health_url(), timeout=1.0) as resp:
                 if resp.status == 200:
                     return True
         except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
             last_err = e
         time.sleep(0.2)
-    raise RuntimeError(f"QSForge server did not become ready in {timeout}s ({last_err})")
+    raise RuntimeError(
+        f"QSForge server did not become ready in {timeout}s ({last_err})"
+    )
 
 
 # ── Entry ───────────────────────────────────────────────────────────────────
@@ -389,7 +400,7 @@ def main():
     _boot_marker("server responded to /api/health")
 
     api = Api()
-    url = f"{APP_URL}?_ts={int(time.time())}"
+    url = f"{_app_url()}?_ts={int(time.time())}"
     window = webview.create_window(
         title=WINDOW_TITLE,
         url=url,
