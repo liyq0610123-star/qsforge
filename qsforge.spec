@@ -26,6 +26,9 @@ PROJECT = Path(SPECPATH)
 datas = [
     (str(PROJECT / "static"), "static"),
     (str(PROJECT / "assets"), "assets"),
+    # Explicit fonts entry — guarantees PyInstaller bundles the large .otf
+    # files even if `collect_data_files` heuristics ever change.
+    (str(PROJECT / "assets" / "fonts"), "assets/fonts"),
     # Bundle the LICENSE + third-party notices so the installed app can show them.
     (str(PROJECT / "LICENSE"), "."),
     (str(PROJECT / "THIRD-PARTY-NOTICES.md"), "."),

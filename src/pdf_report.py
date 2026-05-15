@@ -27,11 +27,57 @@ from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak,
     KeepTogether,
 )
 from reportlab.platypus.flowables import Flowable
+
+import paths as app_paths
+
+
+# ── Font discovery ──────────────────────────────────────────────────────────
+# Prefer fonts bundled inside the QSForge install. This guarantees Chinese
+# text renders on any Windows machine — including English Windows where
+# YaHei / SimHei / SimSun are not installed.
+_BUNDLED_FONT_DIR = app_paths.resource_dir() / "assets" / "fonts"
+
+_CJK_FONT_CANDIDATES = [
+    (_BUNDLED_FONT_DIR / "NotoSansCJKsc-Regular.otf",
+     _BUNDLED_FONT_DIR / "NotoSansCJKsc-Bold.otf"),
+    (Path(r"C:\Windows\Fonts\msyh.ttc"),
+     Path(r"C:\Windows\Fonts\msyhbd.ttc")),
+    (Path(r"C:\Windows\Fonts\simhei.ttf"),
+     Path(r"C:\Windows\Fonts\simhei.ttf")),
+    (Path(r"C:\Windows\Fonts\simsun.ttc"),
+     Path(r"C:\Windows\Fonts\simsun.ttc")),
+]
+
+# Module-level font names — set by _register_cjk_fonts() at PDF generation time.
+FONT_REGULAR = "Helvetica"
+FONT_BOLD = "Helvetica-Bold"
+
+
+def _register_cjk_fonts():
+    """Register a CJK font pair with reportlab. Returns (regular, bold).
+
+    Updates the module-level FONT_REGULAR / FONT_BOLD globals so they can be
+    consumed by the canvas-level draws inside the custom Flowables.
+    """
+    global FONT_REGULAR, FONT_BOLD
+    for regular, bold in _CJK_FONT_CANDIDATES:
+        if regular.exists() and bold.exists():
+            try:
+                pdfmetrics.registerFont(TTFont("QSForgeCJK", str(regular)))
+                pdfmetrics.registerFont(TTFont("QSForgeCJK-Bold", str(bold)))
+                FONT_REGULAR, FONT_BOLD = "QSForgeCJK", "QSForgeCJK-Bold"
+                return FONT_REGULAR, FONT_BOLD
+            except Exception:
+                continue
+    FONT_REGULAR, FONT_BOLD = "Helvetica", "Helvetica-Bold"
+    return FONT_REGULAR, FONT_BOLD
 
 
 # ── Palette (matches the UI) ────────────────────────────────────────────────
@@ -63,31 +109,31 @@ def _styles():
     base = getSampleStyleSheet()
     return {
         "h1": ParagraphStyle("h1", parent=base["Heading1"],
-                             fontName="Helvetica-Bold", fontSize=18, leading=22,
+                             fontName=FONT_BOLD, fontSize=18, leading=22,
                              textColor=NAVY, spaceAfter=2),
         "h2": ParagraphStyle("h2", parent=base["Heading2"],
-                             fontName="Helvetica-Bold", fontSize=13, leading=16,
+                             fontName=FONT_BOLD, fontSize=13, leading=16,
                              textColor=NAVY, spaceBefore=14, spaceAfter=6),
         "h3": ParagraphStyle("h3", parent=base["Heading3"],
-                             fontName="Helvetica-Bold", fontSize=11, leading=14,
+                             fontName=FONT_BOLD, fontSize=11, leading=14,
                              textColor=NAVY, spaceBefore=10, spaceAfter=2),
         "meta": ParagraphStyle("meta", parent=base["Normal"],
-                               fontName="Helvetica", fontSize=9, leading=12,
+                               fontName=FONT_REGULAR, fontSize=9, leading=12,
                                textColor=MUTED),
         "body": ParagraphStyle("body", parent=base["Normal"],
-                               fontName="Helvetica", fontSize=10, leading=14,
+                               fontName=FONT_REGULAR, fontSize=10, leading=14,
                                textColor=NAVY, alignment=TA_LEFT),
         "small": ParagraphStyle("small", parent=base["Normal"],
-                                fontName="Helvetica", fontSize=8.5, leading=11,
+                                fontName=FONT_REGULAR, fontSize=8.5, leading=11,
                                 textColor=MUTED),
         "ids": ParagraphStyle("ids", parent=base["Normal"],
                               fontName="Courier", fontSize=8, leading=10.5,
                               textColor=NAVY),
         "verdict_label": ParagraphStyle("verdict_label", parent=base["Heading1"],
-                                        fontName="Helvetica-Bold", fontSize=22, leading=26,
+                                        fontName=FONT_BOLD, fontSize=22, leading=26,
                                         textColor=NAVY),
         "verdict_extra": ParagraphStyle("verdict_extra", parent=base["Normal"],
-                                        fontName="Helvetica", fontSize=11, leading=14,
+                                        fontName=FONT_REGULAR, fontSize=11, leading=14,
                                         textColor=MUTED),
     }
 
@@ -114,10 +160,10 @@ class ScoreDisk(Flowable):
         c.setLineWidth(2.5)
         c.circle(r, r, r - 2, stroke=1, fill=1)
         c.setFillColor(NAVY)
-        c.setFont("Helvetica-Bold", 26)
+        c.setFont(FONT_BOLD, 26)
         c.drawCentredString(r, r - 2, str(self.score))
         c.setFillColor(MUTED)
-        c.setFont("Helvetica", 8)
+        c.setFont(FONT_REGULAR, 8)
         c.drawCentredString(r, r - 15, "/ 100")
         c.restoreState()
 
@@ -140,11 +186,11 @@ class DimensionBar(Flowable):
     def draw(self):
         c = self.canv
         # Label on the left
-        c.setFont("Helvetica", 9)
+        c.setFont(FONT_REGULAR, 9)
         c.setFillColor(NAVY)
         c.drawString(0, self.HEIGHT / 2 - 2, self.label)
         # Weight — right after label
-        c.setFont("Helvetica", 8)
+        c.setFont(FONT_REGULAR, 8)
         c.setFillColor(MUTED)
         c.drawString(58 * mm, self.HEIGHT / 2 - 2, f"{self.weight}%")
 
@@ -166,7 +212,7 @@ class DimensionBar(Flowable):
             c.rect(bar_x, bar_y, fill_w, bar_h, stroke=0, fill=1)
 
         # Value on the right
-        c.setFont("Helvetica-Bold", 9)
+        c.setFont(FONT_BOLD, 9)
         c.setFillColor(NAVY)
         c.drawRightString(bar_x + bar_w + 15 * mm, self.HEIGHT / 2 - 2, f"{self.score}/100")
 
@@ -190,7 +236,7 @@ class SeverityBadge(Flowable):
         c.setFillColor(color)
         c.roundRect(0, 0, self.w, self.h, 1.2 * mm, stroke=0, fill=1)
         c.setFillColor(colors.white)
-        c.setFont("Helvetica-Bold", 7)
+        c.setFont(FONT_BOLD, 7)
         c.drawCentredString(self.w / 2, self.h / 2 - 2, self.severity)
         c.restoreState()
 
@@ -199,7 +245,7 @@ class SeverityBadge(Flowable):
 def _on_page(canvas, doc):
     canvas.saveState()
     # Footer
-    canvas.setFont("Helvetica", 8)
+    canvas.setFont(FONT_REGULAR, 8)
     canvas.setFillColor(MUTED)
     canvas.drawString(20 * mm, 12 * mm, "Generated by QSForge — Revit Model Quality Check")
     canvas.drawRightString(A4[0] - 20 * mm, 12 * mm, f"Page {doc.page}")
@@ -436,7 +482,7 @@ def _detail_report(data: Dict[str, Any], S: dict) -> List[Flowable]:
             sev = row[0]
             tbl.setStyle(TableStyle([
                 ("TEXTCOLOR", (0, r_idx), (0, r_idx), SEV_COLORS.get(sev, MUTED)),
-                ("FONTNAME", (0, r_idx), (0, r_idx), "Helvetica-Bold"),
+                ("FONTNAME", (0, r_idx), (0, r_idx), FONT_BOLD),
             ]))
         story.append(tbl)
 
@@ -651,7 +697,7 @@ def _items_widths(check_id: str):
 def _table_style(header: bool = True, align_numeric=None) -> TableStyle:
     ts = [
         ("GRID", (0, 0), (-1, -1), 0.3, BORDER),
-        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("FONTNAME", (0, 0), (-1, -1), FONT_REGULAR),
         ("FONTSIZE", (0, 0), (-1, -1), 9),
         ("TEXTCOLOR", (0, 0), (-1, -1), NAVY),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -663,7 +709,7 @@ def _table_style(header: bool = True, align_numeric=None) -> TableStyle:
     if header:
         ts += [
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E2E8F0")),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
             ("TEXTCOLOR", (0, 0), (-1, 0), NAVY),
         ]
     if align_numeric:
@@ -679,6 +725,7 @@ def generate_pdf(data: Dict[str, Any],
     """Render the analysis payload to a PDF file at `output_path`."""
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
+    _register_cjk_fonts()
     S = _styles()
 
     doc = SimpleDocTemplate(

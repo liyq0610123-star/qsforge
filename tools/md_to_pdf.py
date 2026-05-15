@@ -57,54 +57,47 @@ HAIRLINE = colors.HexColor("#CBD5E1")
 
 
 # ── Font discovery ──────────────────────────────────────────────────────────
-# Pillow confirmed these are reliable on Windows 10/11:
-_FONT_CANDIDATES = [
-    # (registered_name, file_path, subfont_index_for_ttc)
-    ("QSForge-Regular", r"C:\Windows\Fonts\msyh.ttc",    0),  # Microsoft YaHei
-    ("QSForge-Regular", r"C:\Windows\Fonts\msyh.ttf",    None),
-    ("QSForge-Regular", r"C:\Windows\Fonts\simhei.ttf",  None),
-    ("QSForge-Regular", r"C:\Windows\Fonts\simsun.ttc",  0),
-]
-_BOLD_CANDIDATES = [
-    ("QSForge-Bold",    r"C:\Windows\Fonts\msyhbd.ttc",  0),
-    ("QSForge-Bold",    r"C:\Windows\Fonts\msyhbd.ttf",  None),
-    ("QSForge-Bold",    r"C:\Windows\Fonts\simhei.ttf",  None),
-    ("QSForge-Bold",    r"C:\Windows\Fonts\simsun.ttc",  0),
+# Prefer fonts bundled inside the QSForge install. This guarantees Chinese
+# text renders on any Windows machine — including English Windows where
+# YaHei / SimHei / SimSun are not installed.
+_BUNDLED_FONT_DIR = Path(__file__).resolve().parent.parent / "assets" / "fonts"
+
+_CJK_FONT_CANDIDATES = [
+    (_BUNDLED_FONT_DIR / "NotoSansCJKsc-Regular.otf",
+     _BUNDLED_FONT_DIR / "NotoSansCJKsc-Bold.otf"),
+    (Path(r"C:\Windows\Fonts\msyh.ttc"),
+     Path(r"C:\Windows\Fonts\msyhbd.ttc")),
+    (Path(r"C:\Windows\Fonts\simhei.ttf"),
+     Path(r"C:\Windows\Fonts\simhei.ttf")),
+    (Path(r"C:\Windows\Fonts\simsun.ttc"),
+     Path(r"C:\Windows\Fonts\simsun.ttc")),
 ]
 
 FONT_REGULAR = "Helvetica"
 FONT_BOLD = "Helvetica-Bold"
 
 
-def _try_register(name: str, path: str, subfont: Optional[int]) -> bool:
-    p = Path(path)
-    if not p.is_file():
-        return False
-    try:
-        if subfont is not None:
-            pdfmetrics.registerFont(TTFont(name, str(p), subfontIndex=subfont))
-        else:
-            pdfmetrics.registerFont(TTFont(name, str(p)))
-        return True
-    except Exception:
-        return False
+def _register_cjk_fonts():
+    """Register a CJK-capable font pair with reportlab.
+
+    Returns (regular_name, bold_name). Falls back to Helvetica if no CJK
+    font is available so reportlab still has *some* font to reach for.
+    """
+    for regular, bold in _CJK_FONT_CANDIDATES:
+        if regular.exists() and bold.exists():
+            try:
+                pdfmetrics.registerFont(TTFont("QSForgeCJK", str(regular)))
+                pdfmetrics.registerFont(TTFont("QSForgeCJK-Bold", str(bold)))
+                return "QSForgeCJK", "QSForgeCJK-Bold"
+            except Exception:
+                continue
+    return "Helvetica", "Helvetica-Bold"
 
 
 def _register_fonts() -> None:
-    """Register Chinese-capable fonts if present; otherwise stick with Helvetica."""
+    """Register Chinese-capable fonts; falls back to Helvetica if none found."""
     global FONT_REGULAR, FONT_BOLD
-    for name, path, sub in _FONT_CANDIDATES:
-        if _try_register(name, path, sub):
-            FONT_REGULAR = name
-            break
-    for name, path, sub in _BOLD_CANDIDATES:
-        if _try_register(name, path, sub):
-            FONT_BOLD = name
-            break
-    # If we found a regular font but no bold, fake bold by reusing regular —
-    # better than Helvetica-Bold which can't render 中文字符.
-    if FONT_REGULAR.startswith("QSForge") and FONT_BOLD == "Helvetica-Bold":
-        FONT_BOLD = FONT_REGULAR
+    FONT_REGULAR, FONT_BOLD = _register_cjk_fonts()
 
 
 # ── Styles (built after fonts are registered) ──────────────────────────────
