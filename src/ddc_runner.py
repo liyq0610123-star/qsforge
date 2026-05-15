@@ -1,5 +1,5 @@
 """
-ArchiQS - DDC Runner
+QSForge - DDC Runner
 Wraps the DDC RvtExporter.exe subprocess so the rest of the app can treat
 "give me an Excel from this .rvt" as a single function call.
 
@@ -24,7 +24,7 @@ def _kill_process_tree(proc) -> None:
     """
     Kill a subprocess **and all of its descendants**.
 
-    Why this matters for ArchiQS: RvtExporter.exe internally spawns child
+    Why this matters for QSForge: RvtExporter.exe internally spawns child
     workers that do the actual Revit parsing. A plain ``proc.kill()`` on
     Windows calls TerminateProcess on the top-level PID only — the grand-
     children keep running for 5+ more minutes and happily write 300+ MB of
@@ -86,9 +86,9 @@ def _reap_zombie_ddc_processes(log) -> int:
     has it pinned.
 
     The symptom is catastrophic: a user sees ONE legitimate failure, then
-    every subsequent analysis in the same ArchiQS session fails with the
+    every subsequent analysis in the same QSForge session fails with the
     same confusing error, and no combination of flags / CWDs / retries
-    fixes it. The only recovery is to kill the zombies or restart ArchiQS.
+    fixes it. The only recovery is to kill the zombies or restart QSForge.
 
     So before launching DDC we sweep for any RvtExporter.exe still alive
     and taskkill them (process tree, to get their orphan workers too).
@@ -276,7 +276,7 @@ def _resolved_timeout(explicit):
     """
     Pick the DDC timeout in seconds, in priority order:
         1. `explicit` argument passed to run_ddc()
-        2. $ARCHIQS_DDC_TIMEOUT_SEC environment variable (integer seconds)
+        2. $QSFORGE_DDC_TIMEOUT_SEC environment variable (integer seconds)
         3. DEFAULT_TIMEOUT_SEC
 
     Values below 60 s are treated as "user slipped" and pinned to 60 s so
@@ -288,7 +288,7 @@ def _resolved_timeout(explicit):
             return max(60, t)
         except (TypeError, ValueError):
             pass
-    env = os.environ.get("ARCHIQS_DDC_TIMEOUT_SEC", "").strip()
+    env = os.environ.get("QSFORGE_DDC_TIMEOUT_SEC", "").strip()
     if env:
         try:
             t = int(env)
@@ -360,7 +360,7 @@ def _resolve_exe(exe_path):
     """
     Pick the exe path to use, in priority order:
         1. Explicit ``exe_path=`` argument
-        2. ``ARCHIQS_DDC_EXE`` environment variable
+        2. ``QSFORGE_DDC_EXE`` environment variable
         3. Bundled copy next to the app   (``<app>\\vendor\\ddc\\RvtExporter.exe``)
         4. Hard-coded dev-machine default (``DEFAULT_DDC_EXE``)
     """
@@ -372,14 +372,14 @@ def _resolve_exe(exe_path):
         raise DDCExecutableNotFound(f"RvtExporter.exe not found at: {p}")
 
     # 2. env var
-    env = os.environ.get("ARCHIQS_DDC_EXE", "").strip()
+    env = os.environ.get("QSFORGE_DDC_EXE", "").strip()
     if env:
         p = Path(env)
         if p.is_file():
             return p
         # Env var was set but path is bad — tell the user clearly.
         raise DDCExecutableNotFound(
-            f"ARCHIQS_DDC_EXE is set but points to a missing file: {p}"
+            f"QSFORGE_DDC_EXE is set but points to a missing file: {p}"
         )
 
     # 3. bundled-with-the-app copy (this is the normal case for end users)
@@ -394,14 +394,14 @@ def _resolve_exe(exe_path):
             return p
 
     tried = [
-        "$ARCHIQS_DDC_EXE env var (not set or invalid)",
+        "$QSFORGE_DDC_EXE env var (not set or invalid)",
         *[f"bundled: {c}" for c in _bundled_ddc_candidates()],
         f"default: {DEFAULT_DDC_EXE}",
     ]
     raise DDCExecutableNotFound(
         "RvtExporter.exe could not be located.\n"
         "Tried:\n  - " + "\n  - ".join(tried) +
-        "\n\nSet ARCHIQS_DDC_EXE or drop RvtExporter.exe into '<app>\\vendor\\ddc\\'."
+        "\n\nSet QSFORGE_DDC_EXE or drop RvtExporter.exe into '<app>\\vendor\\ddc\\'."
     )
 
 
@@ -482,20 +482,20 @@ def _write_debug_dump(proc, cmd, rvt, exe, log=None) -> list[str]:
 
     here = Path(__file__).resolve().parent
     candidates: list[Path] = [
-        Path.cwd() / "archiqs_rvtexporter_last.txt",
-        Path.home() / "archiqs_rvtexporter_last.txt",
-        here / "archiqs_rvtexporter_last.txt",
-        rvt.parent / "archiqs_rvtexporter_last.txt",
+        Path.cwd() / "qsforge_rvtexporter_last.txt",
+        Path.home() / "qsforge_rvtexporter_last.txt",
+        here / "qsforge_rvtexporter_last.txt",
+        rvt.parent / "qsforge_rvtexporter_last.txt",
     ]
     desk = _first_writable_desktop()
     if desk is not None:
-        candidates.append(desk / "archiqs_rvtexporter_last.txt")
+        candidates.append(desk / "qsforge_rvtexporter_last.txt")
     la = os.environ.get("LOCALAPPDATA", "").strip()
     if la:
-        candidates.append(Path(la) / "ArchiQS" / "logs" / "rvtexporter_last.txt")
+        candidates.append(Path(la) / "QSForge" / "logs" / "rvtexporter_last.txt")
     tmp = os.environ.get("TEMP") or os.environ.get("TMP") or ""
     if tmp.strip():
-        candidates.append(Path(tmp) / "archiqs_rvtexporter_last.txt")
+        candidates.append(Path(tmp) / "qsforge_rvtexporter_last.txt")
 
     candidates = list(dict.fromkeys(candidates))
 
@@ -507,15 +507,15 @@ def _write_debug_dump(proc, cmd, rvt, exe, log=None) -> list[str]:
             log(f"DDC log saved: {resolved}")
 
     if written:
-        msg = "[ArchiQS] DDC debug dump written to:\n  " + "\n  ".join(written)
+        msg = "[QSForge] DDC debug dump written to:\n  " + "\n  ".join(written)
         print(msg, file=sys.stderr)
     else:
         msg = (
-            "[ArchiQS] WARN: could not write archiqs_rvtexporter_last.txt anywhere. "
+            "[QSForge] WARN: could not write qsforge_rvtexporter_last.txt anywhere. "
             f"Tried {len(candidates)} locations (cwd, user profile, project, model folder, Desktop, …)."
         )
         print(msg, file=sys.stderr)
-        log("Could not save DDC log to disk — see the terminal that started ArchiQS for details.")
+        log("Could not save DDC log to disk — see the terminal that started QSForge for details.")
     return written
 
 
@@ -552,7 +552,7 @@ def _format_failure_message(proc, cmd, rvt, exe, dump_paths: list[str]) -> str:
             "",
             "Dump file was NOT written (all locations failed).",
             "Look in the analysis log for lines starting with: DDC log saved:",
-            "Or check the terminal where you started main.py for [ArchiQS] messages.",
+            "Or check the terminal where you started main.py for [QSForge] messages.",
         ])
     return "\n".join(lines)
 
@@ -586,7 +586,7 @@ def _mode_marker(rvt: Path) -> Path:
     Parked next to the .rvt so the marker lives and dies with the xlsx. The
     file is tiny (~10 bytes) and plain text so users can inspect it by hand.
     """
-    return rvt.with_name(rvt.stem + "_rvt.archiqs-mode")
+    return rvt.with_name(rvt.stem + "_rvt.qsforge-mode")
 
 
 def _read_mode_marker(rvt: Path) -> str | None:
@@ -643,7 +643,7 @@ def _cache_is_fresh(rvt: Path, xlsx: Path, requested_mode: str) -> tuple[bool, s
     cached_mode = _read_mode_marker(rvt)
     want = _normalise_mode(requested_mode)
     if cached_mode is None:
-        # Legacy xlsx from a pre-mode build of ArchiQS. Safe to reuse only
+        # Legacy xlsx from a pre-mode build of QSForge. Safe to reuse only
         # when the user is asking for the historical default.
         if want == DEFAULT_MODE:
             return True, f"cache hit (legacy xlsx, assumed {DEFAULT_MODE})"
@@ -689,7 +689,7 @@ def run_ddc(
                     surface custom Revit parameters in Module 2+.
     timeout : int, optional
         Seconds to wait before killing the subprocess. Falls back to
-        ARCHIQS_DDC_TIMEOUT_SEC env var, then DEFAULT_TIMEOUT_SEC (60 min).
+        QSFORGE_DDC_TIMEOUT_SEC env var, then DEFAULT_TIMEOUT_SEC (60 min).
     on_progress : callable(str) or None
         Receives short status strings — hook this up to Flask/pywebview later.
     force : bool
@@ -846,7 +846,7 @@ def run_ddc(
     # pages (datadrivenconstruction.io) when a conversion finishes. We suppress
     # that by watching for new top-level windows with DDC keywords in the
     # title and sending WM_CLOSE. See ad_blocker.py for details. The watcher
-    # is a no-op on non-Windows / when ARCHIQS_ALLOW_DDC_ADS=1 is set.
+    # is a no-op on non-Windows / when QSFORGE_ALLOW_DDC_ADS=1 is set.
     _watcher_cm = AdWindowWatcher(log=log) if AdWindowWatcher is not None else None
 
     # Reader threads keep the pipes from filling up on chatty DDC builds
@@ -880,8 +880,8 @@ def run_ddc(
             # IMPORTANT: run DDC with its *own* folder as CWD.
             #
             # Background: with the default (inherited) CWD, DDC fails with
-            # "File does not exist." whenever ArchiQS is launched from
-            # %LOCALAPPDATA%\ArchiQS (i.e. the installed build). The .rvt
+            # "File does not exist." whenever QSForge is launched from
+            # %LOCALAPPDATA%\QSForge (i.e. the installed build). The .rvt
             # path it's given is a perfectly valid absolute path and the
             # file is right there — DDC just can't find it from that CWD.
             # The message is misleading: it's actually ODA/Teigha failing
@@ -890,11 +890,11 @@ def run_ddc(
             #
             # Pinning CWD to exe.parent (the vendor\ddc folder, where all
             # the .tx/.dll/datadrivenlibs siblings live) makes DDC rock
-            # solid regardless of where ArchiQS itself was started from.
+            # solid regardless of where QSForge itself was started from.
             # CREATE_NO_WINDOW (0x08000000) stops Windows from spawning a
             # separate console window for RvtExporter. Without this flag
             # every DDC run flashes an opaque black cmd-style box on top
-            # of ArchiQS — confusing to QS users who have no idea what
+            # of QSForge — confusing to QS users who have no idea what
             # that window is or whether to close it. We still capture
             # stdout/stderr through PIPE, the flag only hides the console
             # chrome. No effect on non-Windows platforms.
@@ -987,12 +987,12 @@ def run_ddc(
         mins = max(1, round(timeout / 60))
         raise DDCTimeout(
             f"DDC conversion of {rvt.name} did not finish within {mins} minutes "
-            f"and was stopped to keep ArchiQS responsive.\n\n"
+            f"and was stopped to keep QSForge responsive.\n\n"
             f"What to try, in order:\n"
             f"  1. Hit 'Retry' — large federated models sometimes finish on "
             f"a second attempt once Windows has cached the file.\n"
             f"  2. Allow more time: set the environment variable "
-            f"ARCHIQS_DDC_TIMEOUT_SEC (e.g. 7200 for 2 hours), then reopen ArchiQS.\n"
+            f"QSFORGE_DDC_TIMEOUT_SEC (e.g. 7200 for 2 hours), then reopen QSForge.\n"
             f"  3. If RAM was still climbing and CPU was still busy at the "
             f"timeout, the conversion was healthy and just needs more time.\n"
             f"  4. If DDC consistently hangs on this model (CPU drops to 0 "
@@ -1191,7 +1191,7 @@ if __name__ == "__main__":
         print(f"  · {msg}")
 
     print("\n" + "═" * 70)
-    print("  ArchiQS  |  DDC RUNNER  (standalone test)")
+    print("  QSForge  |  DDC RUNNER  (standalone test)")
     print("═" * 70)
 
     try:
