@@ -11,6 +11,7 @@ Column names are based on real DDC output analysis.
 Run: python module0_inventory.py <path_to_ddc_excel>
 """
 
+import logging
 import pandas as pd
 import numpy as np
 import sys
@@ -18,6 +19,8 @@ import os
 from datetime import datetime
 from pathlib import Path
 from collections import defaultdict
+
+logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────
 # CONFIG: DDC column names (verified from real DDC output)
@@ -118,13 +121,13 @@ def _prepare_instance_df(filepath):
 
 
 def load_ddc(filepath):
-    print(f"\n{'='*60}")
-    print(f"Loading: {os.path.basename(filepath)}")
-    print(f"{'='*60}")
+    logger.info(f"\n{'='*60}")
+    logger.info(f"Loading: {os.path.basename(filepath)}")
+    logger.info(f"{'='*60}")
 
     df, stats = _prepare_instance_df(filepath)
-    print(f"Raw rows: {stats['raw_rows']:,}  |  Columns: {stats['total_columns']}")
-    print(
+    logger.info(f"Raw rows: {stats['raw_rows']:,}  |  Columns: {stats['total_columns']}")
+    logger.info(
         f"After removing null/zero IDs: {stats['rows_after_id_filter']:,} rows "
         f"(removed {stats['skipped_no_category']})"
     )
@@ -150,13 +153,13 @@ def tag_qs_categories(df, *, verbose=True):
     non_qs_count = (~df["Is_QS_Element"]).sum()
 
     if verbose:
-        print(f"\n{'='*60}")
-        print(f"Category Tagging")
-        print(f"{'='*60}")
-        print(f"QS elements:     {qs_count:,} rows")
-        print(f"Non-QS elements: {non_qs_count:,} rows ({df[~df['Is_QS_Element']][COL_CATEGORY].nunique()} categories)")
-        print(f"\nTop non-QS categories:")
-        print(df[~df["Is_QS_Element"]][COL_CATEGORY].value_counts().head(10).to_string())
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Category Tagging")
+        logger.info(f"{'='*60}")
+        logger.info(f"QS elements:     {qs_count:,} rows")
+        logger.info(f"Non-QS elements: {non_qs_count:,} rows ({df[~df['Is_QS_Element']][COL_CATEGORY].nunique()} categories)")
+        logger.info(f"\nTop non-QS categories:")
+        logger.info(df[~df["Is_QS_Element"]][COL_CATEGORY].value_counts().head(10).to_string())
 
     return df
 
@@ -175,7 +178,7 @@ def filter_non_instances(df, *, verbose=True):
 
     if COL_PHASE not in df.columns:
         if verbose:
-            print(f"\n  WARNING: '{COL_PHASE}' column not found — skipping instance filter")
+            logger.warning(f"\n  WARNING: '{COL_PHASE}' column not found — skipping instance filter")
         return df.copy(), pd.DataFrame()
 
     has_phase = (
@@ -188,11 +191,11 @@ def filter_non_instances(df, *, verbose=True):
     empty_df = df[~has_phase].copy()
 
     if verbose:
-        print(f"\n{'='*60}")
-        print(f"Instance Filter (Phase Created)")
-        print(f"{'='*60}")
-        print(f"Real instances kept: {len(clean_df):,}")
-        print(f"Non-instances removed: {len(empty_df):,} (Phase Created is empty)")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Instance Filter (Phase Created)")
+        logger.info(f"{'='*60}")
+        logger.info(f"Real instances kept: {len(clean_df):,}")
+        logger.info(f"Non-instances removed: {len(empty_df):,} (Phase Created is empty)")
 
     return clean_df, empty_df
 
@@ -216,7 +219,7 @@ def assign_qs_level(df, *, verbose=True):
         if level_col not in df.columns:
             df.loc[mask, "QS_Level"] = "Level_Param_Missing"
             if verbose:
-                print(f"  WARNING: Expected column '{level_col}' not found for {cat}")
+                logger.warning(f"  WARNING: Expected column '{level_col}' not found for {cat}")
             continue
 
         has_level = (
@@ -258,10 +261,10 @@ def assign_data_quality(df, *, verbose=True):
     df["Data_Quality"] = np.select(conditions, labels, default="Unknown")
 
     if verbose:
-        print(f"\n{'='*60}")
-        print(f"Data Quality Summary")
-        print(f"{'='*60}")
-        print(df["Data_Quality"].value_counts().to_string())
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Data Quality Summary")
+        logger.info(f"{'='*60}")
+        logger.info(df["Data_Quality"].value_counts().to_string())
 
     return df
 
@@ -782,13 +785,13 @@ def export(element_list, summary, issues, non_qs_df, input_path):
         issues.to_excel(writer,       sheet_name="Data Quality Issues", index=False)
         non_qs_out.to_excel(writer,   sheet_name="Non-QS Elements",     index=False)
 
-    print(f"\n{'='*60}")
-    print(f"Output saved: {out_path}")
-    print(f"  Sheet 1 — QS Element List:      {len(element_list):,} rows")
-    print(f"  Sheet 2 — Summary:              {len(summary):,} rows")
-    print(f"  Sheet 3 — Data Quality Issues:  {len(issues):,} rows")
-    print(f"  Sheet 4 — Non-QS Elements:      {len(non_qs_out):,} rows")
-    print(f"{'='*60}\n")
+    logger.info(f"\n{'='*60}")
+    logger.info(f"Output saved: {out_path}")
+    logger.info(f"  Sheet 1 — QS Element List:      {len(element_list):,} rows")
+    logger.info(f"  Sheet 2 — Summary:              {len(summary):,} rows")
+    logger.info(f"  Sheet 3 — Data Quality Issues:  {len(issues):,} rows")
+    logger.info(f"  Sheet 4 — Non-QS Elements:      {len(non_qs_out):,} rows")
+    logger.info(f"{'='*60}\n")
     return out_path
 
 
@@ -798,12 +801,12 @@ def export(element_list, summary, issues, non_qs_df, input_path):
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python module0_inventory.py <path_to_ddc_excel>")
+        logger.error("Usage: python module0_inventory.py <path_to_ddc_excel>")
         sys.exit(1)
 
     filepath = sys.argv[1]
     if not os.path.exists(filepath):
-        print(f"File not found: {filepath}")
+        logger.error(f"File not found: {filepath}")
         sys.exit(1)
 
     # Pipeline
