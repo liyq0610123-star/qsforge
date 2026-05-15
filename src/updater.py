@@ -218,6 +218,36 @@ def is_newer(candidate: str | None, current: str | None) -> bool:
     return _parse_version(candidate) > _parse_version(current)
 
 
+def _ensure_not_downgrade(component: str, manifest_version: str | None, installed_version: str | None) -> None:
+    """Refuse to proceed if a manifest section advertises a non-newer version.
+
+    Belt-and-braces for the downgrade-attack threat model: even if a future
+    UI bug or hostile manifest tricks the comparator into offering an older
+    version, the download/apply pipeline still refuses to act on it.
+
+    Raises ``UpdaterError`` rather than returning False so callers can't
+    accidentally swallow the rejection.
+    """
+    if not manifest_version:
+        raise UpdaterError(
+            f"{component} update refused: manifest has no version field"
+        )
+    if not installed_version:
+        # Nothing installed → anything is genuinely newer. Allow.
+        return
+    if _parse_version(manifest_version) <= _parse_version(installed_version):
+        logger.warning(
+            "Refusing %s update: manifest version %s is not newer than installed %s. "
+            "This is the expected response to a stale or hostile manifest.",
+            component, manifest_version, installed_version,
+        )
+        raise UpdaterError(
+            f"{component} update refused: manifest version {manifest_version} "
+            f"is not newer than the installed version {installed_version}. "
+            f"Downgrades are not supported."
+        )
+
+
 # ── Manifest fetch ──────────────────────────────────────────────────────────
 class UpdaterError(Exception):
     """Anything that can go wrong inside the updater pipeline."""
@@ -502,6 +532,15 @@ def download_update(
     if not section:
         raise UpdaterError(f"manifest has no '{component}' section")
 
+    # Defence-in-depth: refuse to download a manifest entry whose version
+    # is older than what's already installed. Pre-empts any UI bug that
+    # would otherwise hand a downgrade installer to apply_qsforge_update().
+    manifest_version = section.get("version") if isinstance(section, dict) else None
+    if component == COMPONENT_QSFORGE:
+        _ensure_not_downgrade(component, manifest_version, _version.QSFORGE_VERSION)
+    elif component == COMPONENT_DDC:
+        _ensure_not_downgrade(component, manifest_version, get_ddc_installed_version())
+
     url_key = "package_url" if component == COMPONENT_DDC else "installer_url"
     url = section.get(url_key)
     if not url:
@@ -781,7 +820,7 @@ def rollback_ddc() -> dict:
 
 
 # ── QSForge apply (delegate to Inno Setup) ─────────────────────────────────
-def apply_qsforge_update(installer_path: Path) -> dict:
+def apply_qsforge_update(installer_path: Path, *, expected_version: str | None = None) -> dict:
     """
     Launch the downloaded Inno Setup installer in silent-restart mode and
     request the running QSForge to exit cleanly. The new build will be
@@ -790,7 +829,17 @@ def apply_qsforge_update(installer_path: Path) -> dict:
     Note this does NOT block — Inno keeps running after we return. Caller
     should immediately tear down the webview window so the installer can
     overwrite QSForge.exe without "file in use" errors.
+
+    ``expected_version``, when provided by the caller, is checked against
+    the currently-installed QSForge version. If it does not represent an
+    upgrade, the installer is NOT launched and an ``UpdaterError`` is
+    raised — defence-in-depth against a downgrade-attack manifest making
+    it past the check in ``download_update``. When None, no extra check
+    is performed (preserving the original 1-arg call sites).
     """
+    if expected_version is not None:
+        _ensure_not_downgrade(COMPONENT_QSFORGE, expected_version, _version.QSFORGE_VERSION)
+
     if not installer_path.is_file():
         return {"status": "error", "message": f"installer missing: {installer_path}"}
 
