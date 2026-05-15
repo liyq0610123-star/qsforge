@@ -14,11 +14,14 @@ Runs locally on 127.0.0.1:7890. pywebview (main.py) owns the window.
 """
 
 import json
+import logging
 import queue
 import threading
 import time
 import uuid
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from flask import Flask, Response, abort, jsonify, request, send_file, send_from_directory
 
@@ -728,7 +731,7 @@ def main():
     # Don't mkdir STATIC_DIR when frozen — it lives inside _MEIPASS (read-only).
     if not app_paths.is_frozen():
         STATIC_DIR.mkdir(exist_ok=True)
-    print(f"QSForge server listening on http://{HOST}:{PORT}")
+    logger.info(f"QSForge server listening on http://{HOST}:{PORT}")
     app.run(host=HOST, port=PORT, threaded=True, debug=False, use_reloader=False)
 
 
