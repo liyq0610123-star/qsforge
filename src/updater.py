@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -63,6 +64,8 @@ import zipfile
 from pathlib import Path
 
 import _version
+
+logger = logging.getLogger(__name__)
 
 
 # ── Module-level constants ──────────────────────────────────────────────────
@@ -921,13 +924,13 @@ def start_download_job(component: str, manifest: dict) -> UpdateJob:
 
 # ── CLI smoke test ─────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    print("QSForge Updater — quick status report")
-    print("─" * 50)
+    logger.info("QSForge Updater — quick status report")
+    logger.info("─" * 50)
     v = get_versions()
     for k, val in v.items():
-        print(f"  {k}: {val}")
-    print()
+        logger.info(f"  {k}: {val}")
+    logger.info("")
     if "--check" in sys.argv:
-        print("Checking for updates…")
+        logger.info("Checking for updates…")
         result = check_for_updates()
-        print(json.dumps(result, indent=2, default=str))
+        logger.info(json.dumps(result, indent=2, default=str))
