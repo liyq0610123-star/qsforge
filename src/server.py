@@ -37,7 +37,37 @@ import _version
 
 # ── Config ──────────────────────────────────────────────────────────────────
 HOST = "127.0.0.1"
+# Default starting port. ``main()`` will auto-fall-back through _PORT_RANGE
+# if 7890 is already taken (another QSForge instance, a dev server, …) and
+# rewrite this global to whatever ended up working.
 PORT = 7890
+# Port-fallback range. 10 ports is enough for any reasonable local-dev
+# collision; if all of these are taken something is genuinely wrong with
+# the user's machine and we'd rather fail loudly than search forever.
+_PORT_RANGE = tuple(range(7890, 7900))
+
+
+def _pick_listening_port(host: str, candidates) -> int | None:
+    """Find the first available TCP port from ``candidates`` on ``host``.
+
+    Uses a probe socket: bind, immediately close, return the port. There's
+    a tiny TOCTOU window between this probe and waitress's later bind, but
+    on a single-user desktop the probability is vanishingly small. We log
+    each port we tried so support diagnostics can see what happened.
+    """
+    import socket
+    for candidate in candidates:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+            try:
+                s.bind((host, candidate))
+            except OSError as e:
+                logger.debug("port %s busy: %s", candidate, e)
+                continue
+        logger.info("picked port %s for QSForge server", candidate)
+        return candidate
+    return None
+
 
 import paths as app_paths
 
@@ -727,12 +757,47 @@ def static_file(filename):
 
 
 # ── Entry ───────────────────────────────────────────────────────────────────
-def main():
+def main(port: int | None = None):
+    """Start the QSForge HTTP server.
+
+    Production builds use waitress (a pure-Python WSGI server); we no
+    longer reach for Flask's built-in dev server, which prints a noisy
+    "WARNING: This is a development server" line and is not designed
+    for concurrent requests under load.
+
+    ``port`` overrides the auto-picked port. When None, we ask
+    ``_pick_listening_port()`` for the first free port in 7890..7899.
+    The chosen port is written back to ``server.PORT`` so main.py and
+    the HEALTH_URL/APP_URL helpers can see what we ended up on.
+    """
+    global PORT
     # Don't mkdir STATIC_DIR when frozen — it lives inside _MEIPASS (read-only).
     if not app_paths.is_frozen():
         STATIC_DIR.mkdir(exist_ok=True)
-    logger.info(f"QSForge server listening on http://{HOST}:{PORT}")
-    app.run(host=HOST, port=PORT, threaded=True, debug=False, use_reloader=False)
+
+    chosen = port if port is not None else _pick_listening_port(HOST, _PORT_RANGE)
+    if chosen is None:
+        logger.error(
+            "No free port in %s..%s for the QSForge server; aborting.",
+            _PORT_RANGE[0], _PORT_RANGE[-1],
+        )
+        raise RuntimeError("No free port in 7890..7899 for QSForge.")
+    PORT = chosen
+    logger.info("QSForge server listening on http://%s:%s", HOST, PORT)
+
+    try:
+        from waitress import serve  # type: ignore[import]
+    except ImportError:
+        logger.warning(
+            "waitress not available — falling back to Flask dev server. "
+            "This should never happen in a frozen build; check the build."
+        )
+        app.run(host=HOST, port=PORT, threaded=True, debug=False, use_reloader=False)
+        return
+    # threads=8 is plenty for a single-user desktop app — analyses run on
+    # background threads in the Job machinery, not in the WSGI worker pool.
+    # ident customises the Server: header in responses.
+    serve(app, host=HOST, port=PORT, threads=8, ident="QSForge")
 
 
 if __name__ == "__main__":

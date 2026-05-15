@@ -49,6 +49,7 @@ hiddenimports += [
     "pandas._libs.tslibs.nattype",
     "pandas._libs.tslibs.timedeltas",
     "pandas._libs.skiplist",
+    "waitress",
 ]
 
 block_cipher = None
