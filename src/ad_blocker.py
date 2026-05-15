@@ -33,12 +33,15 @@ Pure ctypes (user32 / kernel32) — no extra dependencies, no admin rights.
 from __future__ import annotations
 
 import ctypes
+import logging
 import os
 import sys
 import threading
 import time
 from ctypes import wintypes, Structure, Union, POINTER, byref, sizeof
 from typing import Callable, Iterable, Optional
+
+logger = logging.getLogger(__name__)
 
 # ── Win32 bindings ──────────────────────────────────────────────────────────
 _USER32: Optional[ctypes.WinDLL] = None
@@ -515,10 +518,10 @@ class AdWindowWatcher:
 
 # ── CLI smoke test ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    print("Windows available:", _is_windows())
+    logger.info("Windows available: %s", _is_windows())
     if _is_windows():
-        print(f"Currently {len(_list_top_windows())} top-level windows.")
-        print("Watching for 20 s — try opening https://datadrivenconstruction.io/ …")
-        with AdWindowWatcher(log=print, tail_seconds=20.0):
+        logger.info(f"Currently {len(_list_top_windows())} top-level windows.")
+        logger.info("Watching for 20 s — try opening https://datadrivenconstruction.io/ …")
+        with AdWindowWatcher(log=logger.info, tail_seconds=20.0):
             time.sleep(0.1)
         time.sleep(21.0)
