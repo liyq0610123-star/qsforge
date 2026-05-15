@@ -50,6 +50,11 @@ hiddenimports += [
     "pandas._libs.tslibs.timedeltas",
     "pandas._libs.skiplist",
     "waitress",
+    "trimesh",
+    "trimesh.exchange",
+    "trimesh.exchange.gltf",
+    "trimesh.exchange.dae",
+    "pycollada",
 ]
 
 block_cipher = None
