@@ -1,0 +1,4517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QSForge — Revit Model Quality Check</title>
+<style>
+  /* Register --score as an animatable number so conic-gradient can sweep.
+     Supported in Chromium ≥ 85 (WebView2 on Windows is always modern). */
+  @property --score {
+    syntax: "<number>";
+    inherits: true;
+    initial-value: 0;
+  }
+
+  /* ──────────────────────────────────────────────────────────────────────
+     Design tokens — slate-navy palette with careful luminance steps.
+     All colors tuned for WCAG AA on dark backgrounds; nothing is pure
+     black or pure white so UI stays easy on the eyes in a dim office.
+     ────────────────────────────────────────────────────────────────────── */
+  :root {
+    /* Backgrounds: 5 steps of elevation. */
+    --bg:            #070B14;
+    --surface:       #0C1424;
+    --surface-2:     #11192B;
+    --surface-3:     #182442;
+    --surface-hover: #1A2642;
+
+    /* Borders: fine lines first, stronger ones for focus/hover. */
+    --border:        #1B2741;
+    --border-2:      #273555;
+    --border-strong: #34466E;
+
+    /* Text hierarchy — 4 levels so we can actually design hierarchy. */
+    --text:          #F1F5FA;
+    --text-2:        #D6DEEC;
+    --muted:         #8A97B2;
+    --dim:           #5C6A87;
+
+    /* Accents. */
+    --accent:        #5B8DEF;
+    --accent-hover:  #80A6F4;
+    --accent-soft:   rgba(91,141,239,0.12);
+    --accent-ring:   rgba(91,141,239,0.32);
+
+    --success:       #22C55E;
+    --success-soft:  rgba(34,197,94,0.14);
+    --warning:       #F5A524;
+    --warning-soft:  rgba(245,165,36,0.14);
+    --danger:        #F04444;
+    --danger-soft:   rgba(240,68,68,0.14);
+
+    /* Geometry. */
+    --radius-sm:  6px;
+    --radius:    10px;
+    --radius-lg: 14px;
+
+    /* Elevation. */
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.45);
+    --shadow-md: 0 6px 20px -6px rgba(0,0,0,0.5), 0 2px 4px rgba(0,0,0,0.25);
+    --shadow-lg: 0 24px 48px -12px rgba(0,0,0,0.55), 0 4px 12px rgba(0,0,0,0.3);
+    --ring-focus: 0 0 0 3px var(--accent-ring);
+
+    /* Motion. */
+    --t-fast: 120ms cubic-bezier(0.4,0,0.2,1);
+    --t-base: 180ms cubic-bezier(0.4,0,0.2,1);
+  }
+
+  /* ── Reset + base typography ─────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Inter", -apple-system, BlinkMacSystemFont,
+                 "Segoe UI Variable Display", "Segoe UI",
+                 Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.55;
+    font-feature-settings: "cv11", "ss01", "ss03";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+  }
+  body {
+    display: flex; flex-direction: column;
+    min-height: 100vh;
+    /* Very subtle directional gradient so the flat navy doesn't look like
+       a single block — barely perceptible, but adds depth. */
+    background:
+      radial-gradient(1200px 600px at 15% -10%, rgba(91,141,239,0.06), transparent 60%),
+      radial-gradient(800px 400px at 110% 10%, rgba(91,141,239,0.04), transparent 60%),
+      var(--bg);
+  }
+
+  h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+  code, kbd, samp { font-family: "JetBrains Mono", "Cascadia Mono",
+                                  "Consolas", "Menlo", monospace; }
+
+  ::selection { background: var(--accent-ring); color: var(--text); }
+
+  /* Scrollbars — thin, subtle, themed. */
+  * { scrollbar-width: thin; scrollbar-color: var(--border-2) transparent; }
+  *::-webkit-scrollbar { width: 10px; height: 10px; }
+  *::-webkit-scrollbar-thumb {
+    background: var(--border-2); border-radius: 6px; border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover { background: var(--border-strong); background-clip: padding-box; }
+
+  /* ── Header ──────────────────────────────────────────────────────────── */
+  header {
+    padding: 16px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+    background: linear-gradient(180deg, rgba(12,20,36,0.85), rgba(7,11,20,0.6));
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    position: sticky; top: 0;
+    z-index: 10;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand-mark {
+    width: 34px; height: 34px; border-radius: 9px;
+    position: relative;
+    background:
+      radial-gradient(circle at 30% 25%, rgba(255,255,255,0.22), transparent 55%),
+      linear-gradient(135deg, #6BA1FF 0%, #4E7FE3 45%, #2D5AD1 100%);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 16px; color: #FFF;
+    letter-spacing: -0.02em;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.25),
+      0 2px 10px rgba(91,141,239,0.35);
+  }
+  .brand-mark::after {
+    /* fine inner ring for the Claude-ish "chiseled" look */
+    content: ""; position: absolute; inset: 0;
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1);
+  }
+  .brand-title {
+    font-size: 15px; font-weight: 600;
+    letter-spacing: -0.015em;
+  }
+  .brand-sub {
+    font-size: 12px; color: var(--muted); margin-top: 1px;
+    letter-spacing: 0;
+  }
+  .brand-sub .dot { margin: 0 6px; color: var(--dim); }
+
+  .header-status {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-size: 12px; color: var(--muted);
+  }
+  .server-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--success);
+    position: relative;
+  }
+  .server-dot::before {
+    /* pulse ring for the "connected" state */
+    content: ""; position: absolute; inset: -4px;
+    border-radius: 50%;
+    background: var(--success);
+    opacity: 0.35;
+    animation: pulse 2s cubic-bezier(0.4,0,0.6,1) infinite;
+  }
+  .server-dot.down { background: var(--danger); }
+  .server-dot.down::before { background: var(--danger); animation: none; opacity: 0; }
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); opacity: 0.35; }
+    50%      { transform: scale(1.6); opacity: 0; }
+  }
+
+  /* ── Layout ──────────────────────────────────────────────────────────── */
+  main {
+    flex: 1;
+    padding: 40px 32px 56px;
+    max-width: 1200px;
+    width: 100%;
+    margin: 0 auto;
+  }
+
+  /* ── Empty state ─────────────────────────────────────────────────────── */
+  .dropzone {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 72px 40px 64px;
+    text-align: center;
+    background:
+      radial-gradient(600px 300px at 50% 0%, rgba(91,141,239,0.08), transparent 60%),
+      linear-gradient(180deg, var(--surface), var(--surface-2));
+    transition: border-color var(--t-base), background var(--t-base), transform var(--t-fast);
+    overflow: hidden;
+  }
+  .dropzone::before {
+    /* subtle dashed inner outline that intensifies on hover */
+    content: ""; position: absolute; inset: 12px;
+    border: 1.5px dashed var(--border-2);
+    border-radius: calc(var(--radius-lg) - 4px);
+    pointer-events: none;
+    transition: border-color var(--t-base);
+  }
+  .dropzone.hover {
+    border-color: var(--border-strong);
+    background:
+      radial-gradient(600px 300px at 50% 0%, rgba(91,141,239,0.16), transparent 60%),
+      linear-gradient(180deg, var(--surface-2), var(--surface-3));
+  }
+  .dropzone.hover::before { border-color: var(--accent); }
+  .dropzone-icon {
+    width: 56px; height: 56px;
+    margin: 0 auto 22px;
+    border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: 1px solid rgba(91,141,239,0.2);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.03) inset;
+  }
+  .dropzone-icon svg { width: 28px; height: 28px; stroke-width: 1.75; }
+  .dropzone h1 {
+    font-size: 24px; font-weight: 600;
+    letter-spacing: -0.02em;
+    margin-bottom: 8px;
+  }
+  .dropzone p {
+    margin: 0 auto 32px;
+    max-width: 500px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .dropzone .hint {
+    margin-top: 28px;
+    font-size: 12px;
+    color: var(--dim);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .dropzone .hint svg { width: 12px; height: 12px; opacity: 0.7; }
+
+  /* ── Buttons ─────────────────────────────────────────────────────────── */
+  button {
+    font-family: inherit;
+    font-feature-settings: inherit;
+  }
+  button.primary {
+    background: linear-gradient(180deg, #6796F0 0%, #4D7DE3 100%);
+    color: #FFF;
+    border: 0;
+    padding: 12px 26px;
+    font-size: 14px; font-weight: 600;
+    letter-spacing: -0.005em;
+    border-radius: 9px;
+    cursor: pointer;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.18),
+      inset 0 -1px 0 rgba(0,0,0,0.18),
+      0 1px 2px rgba(0,0,0,0.3),
+      0 4px 12px rgba(91,141,239,0.25);
+    transition: transform var(--t-fast), box-shadow var(--t-fast), filter var(--t-fast);
+  }
+  button.primary:hover {
+    filter: brightness(1.06);
+    transform: translateY(-1px);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.22),
+      inset 0 -1px 0 rgba(0,0,0,0.2),
+      0 1px 2px rgba(0,0,0,0.3),
+      0 8px 20px rgba(91,141,239,0.35);
+  }
+  button.primary:active { transform: translateY(0); filter: brightness(0.98); }
+  button.primary:disabled {
+    background: var(--surface-3); color: var(--dim);
+    cursor: not-allowed; box-shadow: none; transform: none; filter: none;
+  }
+  button.primary:focus-visible { outline: none; box-shadow: var(--ring-focus); }
+
+  button.ghost {
+    background: var(--surface);
+    color: var(--text-2);
+    border: 1px solid var(--border);
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 13px; font-weight: 500;
+    cursor: pointer;
+    transition: all var(--t-fast);
+  }
+  button.ghost:hover {
+    border-color: var(--border-strong);
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  button.ghost:active { transform: translateY(1px); }
+  button.ghost:focus-visible { outline: none; box-shadow: var(--ring-focus); }
+
+  /* Destructive variant for Cancel-style actions. */
+  button.ghost.danger {
+    border-color: rgba(239, 68, 68, 0.35);
+    color: #fca5a5;
+  }
+  button.ghost.danger:hover {
+    border-color: rgba(239, 68, 68, 0.7);
+    background: rgba(239, 68, 68, 0.08);
+    color: #fecaca;
+  }
+  button.ghost.danger:disabled {
+    opacity: 0.5; cursor: not-allowed;
+    border-color: rgba(239, 68, 68, 0.2);
+  }
+
+  /* Analyzing panel: title + Cancel button on one row. */
+  .processing-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 4px;
+  }
+  .processing-header h2 { margin: 0; }
+
+  /* Force-reconvert checkbox on the dropzone. */
+  .dropzone .opt {
+    display: inline-flex; align-items: center; gap: 8px;
+    margin-top: 14px;
+    font-size: 13px; color: var(--text-2);
+    cursor: pointer;
+    user-select: none;
+  }
+  .dropzone .opt input[type="checkbox"] {
+    width: 14px; height: 14px;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  .dropzone .opt:hover { color: var(--text); }
+
+  /* DDC mode picker — three radio cards stacked horizontally. */
+  .mode-picker {
+    display: flex;
+    gap: 10px;
+    margin-top: 22px;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 620px;
+    width: 100%;
+  }
+  .mode-picker legend {
+    width: 100%;
+    text-align: center;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+    font-weight: 600;
+  }
+  .mode-card {
+    flex: 1 1 180px;
+    min-width: 160px;
+    position: relative;
+    padding: 12px 14px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--surface) 60%, transparent);
+    cursor: pointer;
+    text-align: left;
+    transition: border-color .15s, background .15s, transform .15s;
+  }
+  .mode-card:hover {
+    border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+    background: color-mix(in srgb, var(--accent) 4%, var(--surface));
+  }
+  .mode-card input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .mode-card:has(input:checked) {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+    box-shadow: 0 0 0 1px var(--accent) inset;
+  }
+  .mode-card .mode-name {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 13px; font-weight: 600;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .mode-card .mode-badge {
+    font-size: 10px; font-weight: 500;
+    padding: 1px 6px; border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 20%, transparent);
+    color: var(--accent);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .mode-card .mode-desc {
+    font-size: 11.5px;
+    color: var(--text-2);
+    line-height: 1.45;
+  }
+  .mode-card .mode-warn {
+    display: block;
+    margin-top: 6px;
+    font-size: 10.5px;
+    color: var(--warn, #f4b860);
+  }
+
+  /* ── Panels ──────────────────────────────────────────────────────────── */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px 26px;
+    margin-bottom: 20px;
+    box-shadow: var(--shadow-sm);
+  }
+  .panel h2 {
+    margin: 0 0 16px;
+    font-size: 11px; font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .file-name {
+    font-size: 16px; font-weight: 500;
+    word-break: break-all;
+    margin-bottom: 10px;
+    letter-spacing: -0.01em;
+    color: var(--text);
+  }
+
+  /* Big live status strip under the filename. Shows what the pipeline is
+     doing right now + (during DDC) elapsed time and RAM. Updated every 2 s
+     by the heartbeat messages from ddc_runner.py. */
+  .live-status {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--accent);
+    margin-bottom: 18px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.005em;
+    min-height: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .live-status::before {
+    content: '';
+    width: 8px; height: 8px; border-radius: 999px;
+    background: var(--accent);
+    box-shadow: 0 0 0 0 rgba(99,102,241,0.6);
+    animation: liveDot 1.4s ease-in-out infinite;
+  }
+  @keyframes liveDot {
+    0%,100% { box-shadow: 0 0 0 0    rgba(99,102,241,0.55); }
+    50%     { box-shadow: 0 0 0 8px  rgba(99,102,241,0);    }
+  }
+
+  /* ── Processing ─────────────────────────────────────────────────────── */
+  .progress {
+    position: relative;
+    height: 3px;
+    background: var(--surface-3);
+    border-radius: 999px;
+    overflow: hidden;
+    margin-bottom: 22px;
+  }
+  .progress .bar {
+    position: absolute; inset: 0;
+    background: linear-gradient(90deg,
+      transparent 0%,
+      var(--accent) 40%,
+      #80A6F4 50%,
+      var(--accent) 60%,
+      transparent 100%);
+    width: 40%;
+    border-radius: inherit;
+    animation: indeterminate 1.6s cubic-bezier(0.4,0,0.2,1) infinite;
+    box-shadow: 0 0 12px rgba(91,141,239,0.6);
+  }
+  @keyframes indeterminate {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(250%); }
+  }
+
+  .log {
+    background: #070B14;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    max-height: 260px;
+    overflow-y: auto;
+    font-family: "JetBrains Mono", "Cascadia Mono", "Consolas", "Menlo", monospace;
+    font-size: 12px;
+    color: var(--text-2);
+    line-height: 1.7;
+  }
+  .log-line { padding: 1px 0; }
+  .log-line .ts {
+    color: var(--dim); margin-right: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Soft highlighting for key milestones so the log reads at a glance. */
+  .log-line.hl-start { color: var(--accent-hover); }
+  .log-line.hl-done  { color: #7EE2A3; }
+  .log-line.hl-err   { color: #F6A2A2; }
+
+  /* ── Results header ──────────────────────────────────────────────────── */
+  .result-header {
+    display: flex; justify-content: space-between; align-items: flex-end;
+    margin-bottom: 24px; gap: 16px; flex-wrap: wrap;
+  }
+  .result-header .file-info { min-width: 0; }
+  .result-header .label-small {
+    font-size: 11px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: 0.08em; margin-bottom: 4px;
+  }
+  .result-header .file-info .name {
+    font-weight: 500; font-size: 15px;
+    color: var(--text);
+    letter-spacing: -0.01em;
+    word-break: break-all;
+  }
+  .bq-failure-note {
+    margin: 12px 0 20px;
+    padding: 12px 16px;
+    background: rgba(245, 158, 11, 0.10);
+    border-left: 3px solid var(--warning);
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--text-2);
+    line-height: 1.55;
+  }
+  .bq-failure-note strong { color: var(--text); margin-right: 4px; }
+
+  .result-header-actions {
+    display: flex;
+    gap: 16px;
+    flex-shrink: 0;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .actions-primary { display: flex; gap: 10px; flex-wrap: wrap; }
+  .actions-utility {
+    display: flex;
+    gap: 8px;
+    padding-left: 16px;
+    border-left: 1px solid var(--border);
+    align-items: stretch;
+  }
+
+  /* ─── Primary action buttons (QS Data / BQ Draft / Export PDF) ──── */
+  button.action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 14px;
+    padding: 11px 18px 11px 13px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    cursor: pointer;
+    transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, background 160ms ease;
+    font-family: inherit;
+    text-align: left;
+    min-width: 182px;
+    color: var(--text);
+    position: relative;
+  }
+  button.action-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 24px -8px rgba(0, 0, 0, 0.45);
+  }
+  button.action-btn:active { transform: translateY(0); box-shadow: none; }
+  button.action-btn:focus-visible { outline: none; box-shadow: var(--ring-focus); }
+
+  /* Colored icon chip — the visual anchor of each button */
+  .action-icon-chip {
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.05);
+    transition: background 160ms ease, transform 160ms ease;
+  }
+  button.action-btn:hover .action-icon-chip { transform: scale(1.05); }
+
+  .action-icon {
+    width: 24px; height: 24px;
+    color: inherit;
+    display: block;
+  }
+  .action-text {
+    display: flex; flex-direction: column;
+    gap: 3px; line-height: 1.15;
+  }
+  .action-title {
+    font-weight: 600;
+    font-size: 14.5px;
+    color: var(--text);
+    letter-spacing: -0.01em;
+  }
+  .action-sub {
+    font-size: 11px;
+    color: var(--muted);
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+
+  /* QS Data — blue (data / structure) */
+  button.action-btn.variant-qs {
+    border-color: rgba(96, 165, 250, 0.40);
+    background: linear-gradient(180deg, rgba(96,165,250,0.10), rgba(96,165,250,0.03));
+  }
+  button.action-btn.variant-qs .action-icon-chip {
+    background: linear-gradient(135deg, rgba(96,165,250,0.30), rgba(96,165,250,0.12));
+    box-shadow: inset 0 0 0 1px rgba(96,165,250,0.30);
+  }
+  button.action-btn.variant-qs .action-icon { color: #bfdbfe; }
+  button.action-btn.variant-qs:hover {
+    border-color: rgba(96, 165, 250, 0.85);
+    background: linear-gradient(180deg, rgba(96,165,250,0.18), rgba(96,165,250,0.05));
+  }
+  button.action-btn.variant-qs:hover .action-icon-chip {
+    background: linear-gradient(135deg, rgba(96,165,250,0.42), rgba(96,165,250,0.18));
+    box-shadow: inset 0 0 0 1px rgba(96,165,250,0.55), 0 4px 12px -2px rgba(96,165,250,0.35);
+  }
+
+  /* BQ Draft — emerald (output / quantities / money) */
+  button.action-btn.variant-bq {
+    border-color: rgba(16, 185, 129, 0.40);
+    background: linear-gradient(180deg, rgba(16,185,129,0.10), rgba(16,185,129,0.03));
+  }
+  button.action-btn.variant-bq .action-icon-chip {
+    background: linear-gradient(135deg, rgba(16,185,129,0.30), rgba(16,185,129,0.12));
+    box-shadow: inset 0 0 0 1px rgba(16,185,129,0.30);
+  }
+  button.action-btn.variant-bq .action-icon { color: #a7f3d0; }
+  button.action-btn.variant-bq:hover {
+    border-color: rgba(16, 185, 129, 0.85);
+    background: linear-gradient(180deg, rgba(16,185,129,0.18), rgba(16,185,129,0.05));
+  }
+  button.action-btn.variant-bq:hover .action-icon-chip {
+    background: linear-gradient(135deg, rgba(16,185,129,0.42), rgba(16,185,129,0.18));
+    box-shadow: inset 0 0 0 1px rgba(16,185,129,0.55), 0 4px 12px -2px rgba(16,185,129,0.35);
+  }
+
+  /* Export PDF — amber (deliverable / report) */
+  button.action-btn.variant-pdf {
+    border-color: rgba(245, 158, 11, 0.40);
+    background: linear-gradient(180deg, rgba(245,158,11,0.10), rgba(245,158,11,0.03));
+  }
+  button.action-btn.variant-pdf .action-icon-chip {
+    background: linear-gradient(135deg, rgba(245,158,11,0.30), rgba(245,158,11,0.12));
+    box-shadow: inset 0 0 0 1px rgba(245,158,11,0.30);
+  }
+  button.action-btn.variant-pdf .action-icon { color: #fde68a; }
+  button.action-btn.variant-pdf:hover {
+    border-color: rgba(245, 158, 11, 0.85);
+    background: linear-gradient(180deg, rgba(245,158,11,0.18), rgba(245,158,11,0.05));
+  }
+  button.action-btn.variant-pdf:hover .action-icon-chip {
+    background: linear-gradient(135deg, rgba(245,158,11,0.42), rgba(245,158,11,0.18));
+    box-shadow: inset 0 0 0 1px rgba(245,158,11,0.55), 0 4px 12px -2px rgba(245,158,11,0.35);
+  }
+
+  /* ─── Utility buttons (JSON, Analyze another) ──── */
+  button.util-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-2);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--t-fast);
+  }
+  button.util-btn:hover {
+    border-color: var(--border-strong);
+    background: var(--surface);
+    color: var(--text);
+  }
+  button.util-btn:active { transform: translateY(1px); }
+  button.util-btn:focus-visible { outline: none; box-shadow: var(--ring-focus); }
+  .util-icon { width: 14px; height: 14px; opacity: 0.85; }
+
+  /* On smaller widths, stack utility group below primary group */
+  @media (max-width: 900px) {
+    .actions-utility {
+      padding-left: 0;
+      border-left: none;
+      width: 100%;
+    }
+  }
+
+  /* ── Verdict card (the hero element) ─────────────────────────────────── */
+  .verdict {
+    --ring: var(--dim);
+    --score: 0;
+    padding: 28px 32px;
+    border-radius: var(--radius-lg);
+    background:
+      radial-gradient(400px 200px at 100% 0%, rgba(91,141,239,0.08), transparent 60%),
+      linear-gradient(180deg, var(--surface-2), var(--surface));
+    border: 1px solid var(--border);
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 32px;
+    align-items: center;
+    box-shadow: var(--shadow-md);
+    position: relative;
+    overflow: hidden;
+  }
+  .verdict.success { --ring: var(--success); }
+  .verdict.warning { --ring: var(--warning); }
+  .verdict.danger  { --ring: var(--danger); }
+  .verdict::before {
+    /* left colored accent strip — subtler than a 4px border */
+    content: ""; position: absolute;
+    left: 0; top: 24px; bottom: 24px; width: 3px;
+    background: var(--ring);
+    border-radius: 0 3px 3px 0;
+    opacity: 0.85;
+  }
+
+  /* Circular progress ring rendered entirely in CSS (conic-gradient).
+     --score is set from JS (0..100). Inner hole is an absolutely-
+     positioned pseudo-element matching the surrounding card color. */
+  .verdict-score {
+    position: relative;
+    width: 144px; height: 144px;
+    border-radius: 50%;
+    background: conic-gradient(
+      from -90deg,
+      var(--ring) calc(var(--score) * 1%),
+      var(--border) 0
+    );
+    display: grid; place-items: center;
+    flex-shrink: 0;
+    box-shadow:
+      inset 0 0 0 1px rgba(255,255,255,0.03),
+      0 0 36px -8px color-mix(in srgb, var(--ring) 60%, transparent);
+    transition: --score 900ms cubic-bezier(0.22,1,0.36,1),
+                box-shadow 400ms ease;
+  }
+  .verdict-score::before {
+    content: ""; position: absolute; inset: 8px;
+    border-radius: 50%;
+    background:
+      radial-gradient(circle at 35% 30%, rgba(255,255,255,0.04), transparent 55%),
+      var(--surface);
+    box-shadow: inset 0 0 0 1px var(--border);
+  }
+  .verdict-score .num, .verdict-score .den {
+    position: relative; z-index: 1;
+  }
+  .verdict-score .num {
+    font-size: 44px; font-weight: 600; line-height: 1;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.04em;
+    color: var(--text);
+  }
+  .verdict-score .den {
+    font-size: 11px; color: var(--muted);
+    margin-top: 6px; letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+
+  .verdict-main { min-width: 0; }
+  .verdict-headline {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 6px;
+  }
+  .verdict-icon {
+    font-size: 20px; line-height: 1;
+    width: 28px; height: 28px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--ring) 18%, transparent);
+    color: var(--ring);
+  }
+  .verdict-title {
+    font-size: 22px; font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--text);
+  }
+  .verdict-extra {
+    color: var(--muted);
+    font-size: 13px; margin-bottom: 20px;
+    line-height: 1.5;
+  }
+  .verdict-extra .hrs { color: var(--text); font-weight: 600; }
+
+  /* Dimension bars — grouped list, right-aligned numbers. */
+  .verdict-dims { display: grid; gap: 10px; }
+  .vdim {
+    display: grid;
+    grid-template-columns: 180px 1fr 72px;
+    align-items: center;
+    gap: 14px;
+    font-size: 12px;
+  }
+  .vdim-label {
+    color: var(--text-2);
+    display: flex; justify-content: space-between;
+    padding-right: 8px;
+    font-weight: 500;
+  }
+  .vdim-label .w {
+    color: var(--dim); font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+  .vdim-bar {
+    position: relative;
+    height: 6px;
+    background: var(--surface-3);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .vdim-bar > span {
+    display: block; height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+    transition: width 420ms cubic-bezier(0.22,1,0.36,1);
+  }
+  .vdim-bar.low  > span { background: linear-gradient(90deg, #DC2626, #F87171); }
+  .vdim-bar.mid  > span { background: linear-gradient(90deg, #D97706, #FBBF24); }
+  .vdim-bar.high > span { background: linear-gradient(90deg, #059669, #34D399); }
+  .vdim-val {
+    text-align: right; font-variant-numeric: tabular-nums;
+    color: var(--dim); font-size: 11px;
+  }
+  .vdim-val strong {
+    color: var(--text); font-size: 13px; font-weight: 600;
+  }
+  .vdim-components {
+    grid-column: 1 / -1;
+    padding: 8px 0 2px 192px;
+    color: var(--muted); font-size: 11px;
+    line-height: 1.8;
+    display: none;
+  }
+  .vdim.expanded .vdim-components { display: block; }
+  .vdim-toggle {
+    background: none; border: none; color: var(--dim);
+    cursor: pointer; padding: 0; font-size: 11px;
+    text-decoration: underline; text-decoration-style: dotted;
+    text-underline-offset: 2px;
+    transition: color var(--t-fast);
+  }
+  .vdim-toggle:hover { color: var(--accent-hover); }
+
+  /* ── Stat tiles ──────────────────────────────────────────────────────── */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin: 22px 0 24px;
+  }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    transition: border-color var(--t-fast), transform var(--t-fast),
+                background var(--t-fast);
+  }
+  .stat:hover {
+    border-color: var(--border-2);
+    background: var(--surface-2);
+  }
+  .stat .label {
+    font-size: 11px; color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 500;
+  }
+  .stat .value {
+    font-size: 26px; font-weight: 600;
+    margin-top: 8px;
+    letter-spacing: -0.025em;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+  }
+
+  /* ── Issues list ─────────────────────────────────────────────────────── */
+  .issue {
+    display: flex; gap: 14px; align-items: flex-start;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .issue:last-child { border-bottom: none; }
+  .issue:first-child { padding-top: 4px; }
+
+  /* ── Severity pills ─────────────────────────────────────────────────── */
+  .sev-pill {
+    font-size: 10px; font-weight: 600;
+    padding: 4px 9px 4px 7px;
+    border-radius: 999px;
+    letter-spacing: 0.04em;
+    flex-shrink: 0;
+    min-width: 78px;
+    text-align: center;
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 5px;
+    border: 1px solid transparent;
+  }
+  .sev-pill::before {
+    content: ""; width: 6px; height: 6px; border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+  }
+  .sev-pill.CRITICAL { background: var(--danger-soft);  color: #F39797; border-color: rgba(240,68,68,0.25); }
+  .sev-pill.WARNING  { background: var(--warning-soft); color: #F4C36A; border-color: rgba(245,165,36,0.25); }
+  .sev-pill.OK       { background: var(--success-soft); color: #7EE2A3; border-color: rgba(34,197,94,0.25); }
+
+  .issue-body { flex: 1; min-width: 0; }
+  .issue-body .cat { font-weight: 500; font-size: 14px; color: var(--text); }
+  .issue-body .msg { color: var(--muted); font-size: 13px; margin-top: 2px; }
+
+  /* ── Inventory table ────────────────────────────────────────────────── */
+  table.inventory {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  table.inventory th, table.inventory td {
+    padding: 11px 14px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  table.inventory thead tr { border-bottom: 1px solid var(--border-2); }
+  table.inventory th {
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    padding-top: 6px; padding-bottom: 10px;
+  }
+  table.inventory tbody tr { transition: background var(--t-fast); }
+  table.inventory tbody tr:hover { background: var(--surface-2); }
+  table.inventory td.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  table.inventory td:first-child { color: var(--text); font-weight: 500; }
+
+  /* Coverage pills — more restrained than the severity ones. */
+  .cov {
+    display: inline-flex; align-items: center;
+    padding: 2px 10px; border-radius: 999px;
+    font-size: 11px; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    background: var(--surface-3);
+    color: var(--muted);
+    border: 1px solid var(--border);
+  }
+  .cov.ok  { background: var(--success-soft); color: #7EE2A3; border-color: rgba(34,197,94,0.22); }
+  .cov.mid { background: var(--warning-soft); color: #F4C36A; border-color: rgba(245,165,36,0.22); }
+  .cov.bad { background: var(--danger-soft);  color: #F39797; border-color: rgba(240,68,68,0.22); }
+
+  /* ── Error state ─────────────────────────────────────────────────────── */
+  .error-panel {
+    background: linear-gradient(180deg,
+      rgba(240,68,68,0.06),
+      rgba(240,68,68,0.03));
+    border: 1px solid rgba(240,68,68,0.25);
+    border-radius: var(--radius);
+    padding: 22px 24px;
+  }
+  .error-panel h3 {
+    margin: 0 0 8px; color: #F6A2A2;
+    font-size: 16px; font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .error-panel code {
+    display: block; margin-top: 12px;
+    background: #070B14;
+    padding: 14px 16px;
+    border-radius: 8px; color: var(--text-2);
+    font-size: 12px; white-space: pre-wrap;
+    word-break: break-word;
+    max-height: min(55vh, 480px); overflow-y: auto;
+    border: 1px solid var(--border);
+    line-height: 1.65;
+  }
+
+  /* ── Quality checks (details/summary) ────────────────────────────────── */
+  .qc {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 10px;
+    background: var(--surface);
+    overflow: hidden;
+    transition: border-color var(--t-fast), background var(--t-fast);
+  }
+  .qc::before {
+    /* tiny severity stripe on the left — invisible for OK, coloured otherwise */
+    content: ""; position: absolute;
+    left: 0; top: 14px; bottom: 14px; width: 2px;
+    background: transparent;
+    border-radius: 0 2px 2px 0;
+    transition: background var(--t-base);
+  }
+  .qc:has(.sev-pill.CRITICAL)::before { background: var(--danger); }
+  .qc:has(.sev-pill.WARNING)::before  { background: var(--warning); }
+  .qc:hover { border-color: var(--border-2); }
+  .qc:last-child { margin-bottom: 0; }
+  .qc[open] { background: var(--surface-2); border-color: var(--border-2); }
+
+  .qc summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 16px 18px;
+    display: flex; align-items: center; gap: 14px;
+    outline: none;
+  }
+  .qc summary::-webkit-details-marker { display: none; }
+  .qc summary .chev {
+    color: var(--dim);
+    font-size: 10px;
+    transition: transform var(--t-base);
+    display: inline-block;
+    width: 12px; text-align: center;
+    flex-shrink: 0;
+  }
+  .qc[open] summary .chev { transform: rotate(90deg); color: var(--muted); }
+  .qc-title {
+    flex: 1; min-width: 0;
+    font-weight: 500; font-size: 14px;
+    letter-spacing: -0.005em;
+    color: var(--text);
+  }
+  .qc-summary {
+    color: var(--muted); font-size: 13px;
+    margin-top: 3px; font-weight: 400;
+    line-height: 1.5;
+  }
+  .qc-body {
+    border-top: 1px solid var(--border);
+    padding: 18px 18px 20px;
+    background: var(--surface);
+  }
+  .qc-body .description {
+    color: var(--muted); font-size: 13px; margin: 0 0 16px;
+    line-height: 1.6;
+  }
+  .qc-cat-table {
+    width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 13px;
+  }
+  .qc-cat-table th, .qc-cat-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+  }
+  .qc-cat-table thead tr { border-bottom: 1px solid var(--border-2); }
+  .qc-cat-table th {
+    color: var(--muted); font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.08em; font-weight: 600;
+  }
+  .qc-cat-table tbody tr:last-child td { border-bottom: none; }
+  .qc-cat-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .qc-cat-table td.mono { font-family: "JetBrains Mono", "Consolas", "Menlo", monospace; color: var(--text-2); font-size: 12px; }
+  .qc-cat-table td.small { color: var(--muted); font-size: 12px; }
+  .qc-cat-table td:first-child { color: var(--text); }
+
+  .qc-items-header {
+    font-size: 11px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: 0.08em; margin-bottom: 8px; font-weight: 600;
+  }
+  .qc-layer-sub {
+    padding: 12px 14px 14px 36px;
+    background: var(--surface-2);
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .qc-layer-sub table { width: 100%; border-collapse: collapse; }
+  .qc-layer-sub th, .qc-layer-sub td {
+    padding: 5px 10px; border-bottom: 1px solid var(--border);
+    text-align: left; font-size: 12px;
+  }
+  .qc-layer-sub tbody tr:last-child td { border-bottom: none; }
+  .qc-layer-sub th {
+    color: var(--muted); font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px;
+  }
+  .qc-layer-sub td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .qc-layer-sub .gap { color: #F39797; font-weight: 600; }
+
+  .qc-ids-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin: 4px 0 8px;
+    gap: 12px;
+  }
+  .qc-ids-header .label {
+    font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600;
+  }
+  .qc-ids {
+    background: #070B14;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-family: "JetBrains Mono", "Consolas", "Menlo", monospace;
+    font-size: 12px;
+    color: var(--text-2);
+    max-height: 180px; overflow-y: auto;
+    word-break: break-all; line-height: 1.8;
+  }
+  /* Shared element-ID display used in QS Readiness Flags and M1 detail */
+  .ids-block { margin-top: 10px; }
+  .ids-label {
+    font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600;
+    margin-right: 8px;
+  }
+  .ids-grid {
+    display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;
+    max-height: 140px; overflow-y: auto;
+  }
+  .id-chip {
+    background: #070B14;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-family: "JetBrains Mono", "Consolas", monospace;
+    font-size: 11px; color: var(--text-2);
+    white-space: nowrap;
+  }
+  /* Module 1 dimension detail cards */
+  .m1-dim {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    background: var(--surface);
+  }
+  /* Family + Type grouped element-IDs */
+  .ft-groups {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+  .ft-groups-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px;
+    background: rgba(0,0,0,0.18);
+    border-bottom: 1px solid var(--border);
+    gap: 12px;
+  }
+  details.ft-group {
+    border-top: 1px solid var(--border);
+  }
+  details.ft-group:first-of-type { border-top: none; }
+  details.ft-group > summary {
+    list-style: none; cursor: pointer;
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+  details.ft-group > summary::-webkit-details-marker { display: none; }
+  details.ft-group > summary::before {
+    content: "▸"; color: var(--muted); font-size: 10px;
+    transition: transform 0.15s;
+    width: 10px; flex-shrink: 0;
+  }
+  details.ft-group[open] > summary::before { transform: rotate(90deg); }
+  details.ft-group > summary:hover { background: rgba(255,255,255,0.02); }
+  .ft-count {
+    display: inline-block; min-width: 44px;
+    padding: 2px 8px; border-radius: 4px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    font-family: "JetBrains Mono", "Consolas", monospace;
+    font-size: 11px; font-weight: 600;
+    text-align: right;
+  }
+  .ft-name { color: var(--text); font-size: 13px; }
+  .ft-name strong { color: var(--text); }
+  .ft-body { padding: 8px 12px 12px 32px; }
+  .ft-body-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 6px; gap: 12px;
+  }
+  .m1-dim-header {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 4px;
+  }
+  .m1-dim-header strong { font-size: 14px; }
+  .m1-dim-header .dim-score {
+    font-size: 13px; font-weight: 700; min-width: 40px; text-align: right;
+  }
+  .m1-dim-header .dim-score.ok   { color: var(--success); }
+  .m1-dim-header .dim-score.warn { color: var(--warning); }
+  .m1-dim-header .dim-score.crit { color: var(--danger);  }
+  .btn-copy {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    border-radius: 7px;
+    padding: 5px 11px;
+    font-size: 12px; font-weight: 500;
+    cursor: pointer;
+    transition: all var(--t-fast);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn-copy::before {
+    /* tiny clipboard glyph done in pure CSS */
+    content: ""; width: 10px; height: 11px;
+    border: 1.25px solid currentColor; border-radius: 2px;
+    border-top-width: 3px; border-top-color: transparent;
+    box-shadow: 0 -2px 0 currentColor, 0 -3.5px 0 transparent;
+    flex-shrink: 0;
+  }
+  .btn-copy:hover {
+    border-color: var(--border-strong);
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  .btn-copy.done {
+    border-color: rgba(34,197,94,0.4);
+    background: var(--success-soft);
+    color: #7EE2A3;
+  }
+  /* Smaller copy button for per-category rows so the summary header stays
+     visually compact even when 7+ categories are listed. */
+  .btn-copy.btn-copy-sm {
+    padding: 3px 9px;
+    font-size: 11px;
+    border-radius: 6px;
+  }
+
+  /* ── Per-category ID accordion ───────────────────────────────────────── */
+  /* When a check exposes IDs broken down by category (Walls, Beams, …)
+     we render one collapsible <details> per category so the BIM team can
+     copy just the IDs they need. The flat single-block fallback still
+     exists for checks that have only one effective category. */
+  .qc-ids-grouped {
+    margin-top: 8px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: rgba(7,11,20,0.4);
+    overflow: hidden;
+  }
+  .qc-ids-grouped-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    gap: 12px;
+  }
+  .qc-ids-grouped-head .label {
+    font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600;
+  }
+  .qc-ids-grouped-head .total {
+    font-family: "JetBrains Mono", "Consolas", "Menlo", monospace;
+    font-size: 11px; color: var(--text-2);
+    margin-left: 6px;
+  }
+
+  .qc-id-group {
+    border-top: 1px solid var(--border);
+  }
+  .qc-id-group:first-child { border-top: 0; }
+  .qc-id-group > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 9px 14px;
+    display: grid;
+    grid-template-columns: 14px 1fr auto auto;
+    align-items: center;
+    gap: 10px;
+    user-select: none;
+    transition: background var(--t-fast);
+  }
+  .qc-id-group > summary::-webkit-details-marker { display: none; }
+  .qc-id-group > summary:hover { background: var(--surface-2); }
+  .qc-id-group .chev {
+    color: var(--dim);
+    font-size: 9px;
+    transition: transform var(--t-base);
+  }
+  .qc-id-group[open] > summary .chev { transform: rotate(90deg); }
+  .qc-id-group .cat-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    /* Truncate very long category labels rather than wrapping; keeps
+       every row exactly one line tall in the accordion. */
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    min-width: 0;
+  }
+  .qc-id-group .cat-count {
+    font-family: "JetBrains Mono", "Consolas", "Menlo", monospace;
+    font-size: 11px;
+    color: var(--muted);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    padding: 2px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .qc-id-group .qc-ids {
+    margin: 0;
+    border-radius: 0;
+    border: 0;
+    border-top: 1px solid var(--border);
+    max-height: 220px;
+  }
+  .qc-id-group-truncnote {
+    padding: 6px 14px 10px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  /* Flash highlight when jumping from QS → BIM view. */
+  @keyframes qcFlash {
+    0%   { box-shadow: 0 0 0 0 var(--accent-ring); }
+    50%  { box-shadow: 0 0 0 4px var(--accent-ring); }
+    100% { box-shadow: 0 0 0 0 transparent; }
+  }
+  .qc-flash { animation: qcFlash 1.6s ease-out; }
+
+  /* ── View tabs (QS / BIM) ────────────────────────────────────────────── */
+  .view-tabs {
+    display: flex;
+    gap: 2px;
+    margin: 28px 0 18px;
+    padding: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    width: fit-content;
+    box-shadow: var(--shadow-sm);
+  }
+  .view-tab {
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    padding: 9px 20px;
+    cursor: pointer;
+    display: flex; flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    border-radius: 8px;
+    transition: all var(--t-fast);
+    min-width: 180px;
+  }
+  .view-tab:hover { color: var(--text-2); background: var(--surface-2); }
+  .view-tab.active {
+    color: var(--text);
+    background: var(--surface-3);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.05),
+      0 1px 2px rgba(0,0,0,0.3);
+  }
+  .view-tab-label {
+    font-size: 13px; font-weight: 600;
+    letter-spacing: -0.005em;
+  }
+  .view-tab-sub {
+    font-size: 11px;
+    color: var(--dim);
+    font-weight: 400;
+  }
+  .view-tab.active .view-tab-sub { color: var(--muted); }
+
+  /* ── QS narrative ────────────────────────────────────────────────────── */
+  .qs-narrative {
+    color: var(--text-2); font-size: 14px; line-height: 1.75;
+  }
+  .qs-narrative p { margin: 0 0 12px; }
+  .qs-narrative p:last-child { margin-bottom: 0; }
+  .qs-narrative .call-out {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin-top: 14px;
+    font-size: 13px;
+    color: var(--text-2);
+    line-height: 1.6;
+  }
+  .qs-narrative .call-out.danger  { border-left-color: var(--danger); }
+  .qs-narrative .call-out.warning { border-left-color: var(--warning); }
+  .qs-narrative .call-out.success { border-left-color: var(--success); }
+
+  .qs-blockers { display: flex; flex-direction: column; gap: 10px; }
+  .qs-blocker {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 18px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    transition: border-color var(--t-fast), transform var(--t-fast);
+  }
+  .qs-blocker:hover {
+    border-color: var(--border-2);
+    transform: translateX(2px);
+  }
+  .qs-blocker-body { min-width: 0; }
+  .qs-blocker-title {
+    font-weight: 500; font-size: 14px;
+    margin-bottom: 2px;
+    letter-spacing: -0.005em;
+    color: var(--text);
+  }
+  .qs-blocker-detail { color: var(--muted); font-size: 12px; line-height: 1.5; }
+  .qs-blocker-detail .count { color: var(--text); font-weight: 600; }
+  .qs-blocker button {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    border-radius: 7px;
+    padding: 6px 12px;
+    font-size: 12px; font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all var(--t-fast);
+  }
+  .qs-blocker button:hover {
+    border-color: var(--accent);
+    color: var(--accent-hover);
+    background: var(--accent-soft);
+  }
+  .qs-blocker.none {
+    justify-content: center;
+    color: var(--muted);
+    font-size: 13px;
+    grid-template-columns: 1fr;
+    text-align: center;
+    padding: 24px;
+    background: var(--surface);
+  }
+
+  /* Responsive tweak for narrow windows. */
+  @media (max-width: 880px) {
+    main { padding: 28px 20px 40px; }
+    .verdict { grid-template-columns: 1fr; gap: 24px; padding: 24px; }
+    .verdict::before { top: auto; bottom: auto; left: 24px; right: 24px; height: 3px; width: auto; top: 0; }
+    .verdict-score { margin: 0 auto; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .vdim { grid-template-columns: 140px 1fr 60px; }
+  }
+
+  .hidden { display: none !important; }
+  .muted { color: var(--muted); }
+  a { color: var(--accent-hover); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* ── Update UI ───────────────────────────────────────────────────────── */
+  .header-actions {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .update-btn {
+    background: transparent;
+    border: 1px solid var(--border-2);
+    color: var(--text-2);
+    font-size: 12px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    display: flex; align-items: center; gap: 6px;
+    transition: background var(--t-fast), border-color var(--t-fast),
+                color var(--t-fast);
+  }
+  .update-btn:hover { background: var(--surface-hover); border-color: var(--border-strong); }
+  .update-btn .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--dim);
+  }
+  .update-btn.has-update { border-color: var(--accent); color: var(--accent-hover); }
+  .update-btn.has-update .dot {
+    background: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-soft);
+  }
+  /* The toast that pops up in the bottom-right when an update is found
+     during the silent startup check. Designed to be calm and dismissable. */
+  .update-toast {
+    position: fixed; right: 24px; bottom: 24px;
+    width: 360px; max-width: calc(100vw - 48px);
+    background: var(--surface);
+    border: 1px solid var(--border-2);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    padding: 16px 18px;
+    z-index: 100;
+    animation: toast-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  @keyframes toast-in {
+    from { transform: translateY(20px); opacity: 0; }
+    to   { transform: translateY(0);    opacity: 1; }
+  }
+  .update-toast h3 {
+    font-size: 14px; margin-bottom: 4px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .update-toast h3::before {
+    content: ""; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft);
+  }
+  .update-toast p { font-size: 13px; color: var(--muted); margin: 4px 0 12px; }
+  .update-toast .toast-actions {
+    display: flex; justify-content: flex-end; gap: 8px;
+  }
+  .update-toast button {
+    font-size: 12px; padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    background: transparent;
+    border: 1px solid var(--border-2);
+    color: var(--text-2);
+  }
+  .update-toast button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #FFF;
+  }
+  .update-toast button.primary:hover { background: var(--accent-hover); }
+  .update-toast button:hover { background: var(--surface-hover); }
+
+  /* Modal */
+  .modal-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(7, 11, 20, 0.6);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 200;
+    animation: fade-in 180ms ease-out;
+  }
+  @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+  .modal {
+    width: 540px; max-width: calc(100vw - 48px);
+    max-height: calc(100vh - 80px);
+    background: var(--surface);
+    border: 1px solid var(--border-2);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .modal-header {
+    padding: 18px 22px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .modal-header h2 { font-size: 16px; }
+  .modal-close {
+    background: transparent; border: 0;
+    color: var(--muted); cursor: pointer;
+    font-size: 22px; line-height: 1;
+    padding: 4px 8px; border-radius: var(--radius-sm);
+  }
+  .modal-close:hover { background: var(--surface-hover); color: var(--text); }
+  .modal-body { padding: 18px 22px; overflow-y: auto; }
+  .modal-footer {
+    padding: 14px 22px;
+    border-top: 1px solid var(--border);
+    display: flex; justify-content: space-between; gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .upd-row {
+    display: grid; grid-template-columns: 1fr auto;
+    align-items: center; gap: 12px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .upd-row:last-child { border-bottom: 0; }
+  .upd-name { font-size: 14px; font-weight: 600; }
+  .upd-versions {
+    font-size: 12px; color: var(--muted); margin-top: 2px;
+    font-family: "JetBrains Mono", "Cascadia Mono", "Consolas", "Menlo", monospace;
+  }
+  .upd-versions .new {
+    color: var(--accent-hover); font-weight: 600;
+  }
+  .upd-versions .new::before { content: " → "; color: var(--dim); }
+  .upd-status {
+    font-size: 11px; color: var(--muted); margin-top: 4px;
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .upd-status.ok      { color: var(--success); }
+  .upd-status.warn    { color: var(--warning); }
+  .upd-status.err     { color: var(--danger); }
+  .upd-action button {
+    font-size: 12px; padding: 8px 14px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    background: var(--accent); border: 1px solid var(--accent);
+    color: #FFF;
+    transition: background var(--t-fast);
+  }
+  .upd-action button:hover { background: var(--accent-hover); }
+  .upd-action button:disabled {
+    background: var(--surface-2); border-color: var(--border-2);
+    color: var(--dim); cursor: not-allowed;
+  }
+  .upd-progress {
+    height: 6px; background: var(--surface-2);
+    border-radius: 999px; overflow: hidden; margin-top: 8px;
+  }
+  .upd-progress-bar {
+    height: 100%; background: var(--accent);
+    width: 0%;
+    transition: width 0.2s linear;
+  }
+
+  .upd-meta {
+    margin-top: 18px;
+    padding: 12px 14px;
+    border: 1px dashed var(--border-2);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+  .upd-meta code {
+    background: var(--bg);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 11px;
+  }
+
+  /* ─── 3D View tab ─────────────────────────────────────────────── */
+  .three-d-toolbar {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    margin-bottom: 10px;
+    flex-wrap: wrap; gap: 12px;
+  }
+  .td-left { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .td-right { display: flex; align-items: center; gap: 8px; }
+  .td-left label { font-size: 12px; color: var(--muted); }
+  .td-select {
+    background: var(--surface-2); color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-family: inherit; font-size: 12px;
+  }
+  .td-check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .td-check input { margin: 0; cursor: pointer; }
+
+  .three-d-stats {
+    font-size: 12px; color: var(--muted);
+    padding: 4px 4px 10px;
+  }
+
+  .three-d-body {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 12px;
+    height: calc(100vh - 360px);
+    min-height: 480px;
+  }
+  .three-d-viewport {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #0a0a0d;
+    position: relative;
+    overflow: hidden;
+  }
+  .three-d-viewport canvas { display: block; width: 100%; height: 100%; }
+
+  .three-d-loading {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: var(--text-2); gap: 12px; backdrop-filter: blur(2px);
+    background: rgba(10, 10, 13, 0.6);
+  }
+  .td-spinner {
+    width: 36px; height: 36px;
+    border: 3px solid var(--border);
+    border-top-color: var(--text);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .td-loading-text { font-size: 13px; }
+
+  .three-d-error {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    text-align: center; padding: 20px;
+    color: var(--muted); font-size: 13px;
+  }
+
+  .three-d-inspector {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    padding: 16px;
+    overflow-y: auto;
+  }
+  .td-inspector-empty {
+    color: var(--muted); font-size: 13px; text-align: center; margin-top: 24px;
+  }
+  .td-insp-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .td-insp-row:last-child { border-bottom: none; }
+  .td-insp-label { color: var(--muted); }
+  .td-insp-value { color: var(--text); font-family: "JetBrains Mono", monospace; font-size: 12px; }
+  .td-insp-issue {
+    margin-top: 8px; padding: 8px 10px;
+    background: rgba(239, 68, 68, 0.10);
+    border-left: 3px solid var(--danger);
+    border-radius: 6px;
+    font-size: 12px;
+  }
+  .td-insp-issue.warning {
+    background: rgba(245, 158, 11, 0.10);
+    border-left-color: var(--warning);
+  }
+  .td-insp-section-title {
+    font-size: 11px; font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    margin: 0 0 8px;
+  }
+  .td-insp-actions {
+    margin-top: 12px;
+    display: flex; gap: 8px;
+  }
+
+  /* Filter panel — one checkbox per Category */
+  .td-filters {
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .td-filters > summary {
+    cursor: pointer;
+    list-style: none;
+    font-size: 11px; font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 4px 0 8px;
+    user-select: none;
+  }
+  .td-filters > summary::-webkit-details-marker { display: none; }
+  .td-filters > summary::before {
+    content: "▸ ";
+    color: var(--muted);
+    transition: transform 0.15s;
+    display: inline-block;
+  }
+  .td-filters[open] > summary::before { content: "▾ "; }
+  .td-filter-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 2px;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .td-filter-row:hover { background: rgba(255,255,255,0.03); }
+  .td-filter-row input { margin: 0; cursor: pointer; }
+  .td-filter-name {
+    flex: 1; font-size: 12px; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .td-filter-count {
+    color: var(--muted); font-size: 11px;
+    font-family: "JetBrains Mono", monospace;
+  }
+  .td-filter-actions {
+    float: right;
+    display: inline-flex; gap: 4px;
+    margin-left: 6px;
+  }
+  .td-filter-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    text-transform: none; letter-spacing: 0;
+  }
+  .td-filter-btn:hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+
+  /* Search box at the very top of the inspector pane */
+  .td-search {
+    position: relative;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .td-search input[type=search] {
+    width: 100%;
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-family: inherit;
+    font-size: 13px;
+    box-sizing: border-box;
+  }
+  .td-search input[type=search]::placeholder { color: var(--muted); }
+  .td-search input[type=search]:focus {
+    outline: none;
+    border-color: var(--text-2);
+  }
+  .td-search-hint {
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--muted);
+    min-height: 14px;
+  }
+
+  /* Multi-selection inspector — grouped totals rows */
+  .td-insp-grouprow {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 8px;
+    padding: 4px 2px;
+    font-size: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .td-insp-grouprow:last-child { border-bottom: none; }
+  .td-insp-name {
+    color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .td-insp-c {
+    color: var(--muted);
+    font-family: "JetBrains Mono", monospace;
+    min-width: 40px; text-align: right;
+  }
+  .td-insp-v {
+    color: var(--text-2);
+    font-family: "JetBrains Mono", monospace;
+    min-width: 70px; text-align: right;
+  }
+  .td-insp-note {
+    font-size: 11px; color: var(--muted);
+    text-align: center;
+    padding: 6px 0;
+  }
+
+  .three-d-help {
+    font-size: 11px; color: var(--muted);
+    text-align: center; padding-top: 8px;
+  }
+
+  @media (max-width: 1100px) {
+    .three-d-body { grid-template-columns: 1fr; }
+    .three-d-inspector { max-height: 240px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="brand-mark">A</div>
+    <div>
+      <div class="brand-title">QSForge</div>
+      <div class="brand-sub">Revit Model Quality Check<span class="dot">·</span>QS + BIM dual view</div>
+    </div>
+  </div>
+  <div class="header-actions">
+    <button id="btn-updates" class="update-btn" title="Check for QSForge / DDC updates">
+      <span class="dot"></span>
+      <span id="update-btn-label">Updates</span>
+    </button>
+    <div class="header-status">
+      <span id="server-status" class="server-dot" title="Server online"></span>
+      <span id="server-label">connected</span>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <!-- ── Empty state ───────────────────────────────────────────────── -->
+  <section id="state-empty">
+    <div id="dropzone" class="dropzone">
+      <div class="dropzone-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+      </div>
+      <h1>Drop a Revit file to begin</h1>
+      <p>QSForge runs a quality check on your <code>.rvt</code> model and returns a QS-readiness report in about a minute.</p>
+      <button class="primary" id="btn-pick">Choose a Revit file</button>
+
+      <fieldset class="mode-picker" id="mode-picker">
+        <legend>DDC export depth</legend>
+
+        <label class="mode-card">
+          <input type="radio" name="ddc-mode" value="basic" />
+          <div class="mode-name">Basic</div>
+          <div class="mode-desc">
+            Element inventory only — fastest path to a Revit content listing.
+            Good for a quick sanity check or when the model is huge and you
+            just want to see what's inside.
+          </div>
+          <span class="mode-warn">No geometry — Module 2 checks will be limited.</span>
+        </label>
+
+        <label class="mode-card">
+          <input type="radio" name="ddc-mode" value="standard" checked />
+          <div class="mode-name">
+            Standard
+            <span class="mode-badge">Recommended</span>
+          </div>
+          <div class="mode-desc">
+            Balanced. Includes Level, Family, Material, Volume/Area/Length
+            and host relationships — everything every QSForge check needs
+            today. Use this unless you have a reason not to.
+          </div>
+        </label>
+
+        <label class="mode-card">
+          <input type="radio" name="ddc-mode" value="complete" />
+          <div class="mode-name">Complete</div>
+          <div class="mode-desc">
+            Standard + all Type parameters and extended metadata. Slightly
+            slower and a larger xlsx, but surfaces custom Revit parameters
+            for deeper inspection.
+          </div>
+        </label>
+      </fieldset>
+
+      <label class="opt" title="DDC conversion takes 10–25 min on large models. When unchecked, QSForge skips DDC if a fresh xlsx from the same mode is still next to the .rvt. Check this to force DDC to run again.">
+        <input type="checkbox" id="opt-force" />
+        <span>Force DDC reconvert (ignore cached output)</span>
+      </label>
+      <div class="hint">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+        Processing happens locally on your machine. Nothing is uploaded.
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Processing ────────────────────────────────────────────────── -->
+  <section id="state-processing" class="hidden">
+    <div class="panel">
+      <div class="processing-header">
+        <h2>Analyzing</h2>
+        <button class="ghost danger" id="btn-cancel" title="Stop the current DDC conversion. The output xlsx — if DDC already finished — is kept so the next run can skip reconversion.">Cancel</button>
+      </div>
+      <div class="file-name" id="proc-file">—</div>
+      <div class="live-status" id="live-status">Preparing…</div>
+      <div class="progress"><div class="bar"></div></div>
+      <div class="log" id="log"></div>
+    </div>
+  </section>
+
+  <!-- ── Results ───────────────────────────────────────────────────── -->
+  <section id="state-results" class="hidden">
+    <div class="result-header">
+      <div class="file-info">
+        <div class="label-small">Analyzed file</div>
+        <div class="name" id="res-filename">—</div>
+      </div>
+      <div class="result-header-actions">
+        <div class="actions-primary">
+          <button class="action-btn variant-qs hidden" id="btn-open-qs-data" title="Open the Module 0 structured QS data Excel alongside the .rvt">
+            <span class="action-icon-chip">
+              <svg viewBox="0 0 24 24" class="action-icon" aria-hidden="true">
+                <!-- Spreadsheet body with subtle fill -->
+                <rect x="3" y="3" width="18" height="18" rx="2.4"
+                      fill="currentColor" fill-opacity="0.14"
+                      stroke="currentColor" stroke-width="1.6"/>
+                <!-- Highlighted header row -->
+                <path d="M3 3h18v5H3z" fill="currentColor" fill-opacity="0.42"/>
+                <path d="M3 8h18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                <!-- Row dividers -->
+                <path d="M3 13h18M3 17h18" stroke="currentColor" stroke-width="1.2" opacity="0.65" stroke-linecap="round"/>
+                <!-- Column dividers -->
+                <path d="M9 8v13M15 8v13" stroke="currentColor" stroke-width="1.2" opacity="0.75" stroke-linecap="round"/>
+              </svg>
+            </span>
+            <span class="action-text">
+              <span class="action-title">QS Data</span>
+              <span class="action-sub">Structured Excel ↗</span>
+            </span>
+          </button>
+          <button class="action-btn variant-bq hidden" id="btn-open-bq" title="Open the BQ Draft Excel generated alongside the .rvt">
+            <span class="action-icon-chip">
+              <svg viewBox="0 0 24 24" class="action-icon" aria-hidden="true">
+                <!-- Invoice/receipt with zigzag bottom -->
+                <path d="M5 3h14v18l-1.8-1.4-1.8 1.4-1.8-1.4-1.8 1.4-1.8-1.4-1.8 1.4-1.7-1.4L5 21V3z"
+                      fill="currentColor" fill-opacity="0.14"
+                      stroke="currentColor" stroke-width="1.6"
+                      stroke-linejoin="round" stroke-linecap="round"/>
+                <!-- Header band -->
+                <path d="M8 7h8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                <!-- Item lines -->
+                <path d="M8 11h8M8 14h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity="0.85"/>
+                <!-- Divider before total -->
+                <path d="M8 16.5h8" stroke="currentColor" stroke-width="1" opacity="0.5"/>
+                <!-- Total amount mark -->
+                <path d="M8 19h3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                <circle cx="15.5" cy="19" r="1.5" fill="currentColor"/>
+              </svg>
+            </span>
+            <span class="action-text">
+              <span class="action-title">BQ Draft</span>
+              <span class="action-sub">NRM2 Bill ↗</span>
+            </span>
+          </button>
+          <button class="action-btn variant-pdf" id="btn-export-pdf" title="Save a shareable PDF report with score, top blockers and Element IDs">
+            <span class="action-icon-chip">
+              <svg viewBox="0 0 24 24" class="action-icon" aria-hidden="true">
+                <!-- Document with folded corner -->
+                <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6z"
+                      fill="currentColor" fill-opacity="0.14"
+                      stroke="currentColor" stroke-width="1.6"
+                      stroke-linejoin="round"/>
+                <!-- Corner fold accent -->
+                <path d="M14 3v6h6"
+                      fill="currentColor" fill-opacity="0.25"
+                      stroke="currentColor" stroke-width="1.6"
+                      stroke-linejoin="round"/>
+                <!-- "PDF" indicated by stacked lines -->
+                <path d="M8 13h8M8 16h8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity="0.85"/>
+                <!-- Download arrow -->
+                <path d="M12 17.5v3m-1.7-1.4L12 20.5l1.7-1.4"
+                      stroke="currentColor" stroke-width="1.7"
+                      stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+              </svg>
+            </span>
+            <span class="action-text">
+              <span class="action-title">Export PDF</span>
+              <span class="action-sub">Shareable report</span>
+            </span>
+          </button>
+        </div>
+        <div class="actions-utility">
+          <button class="util-btn" id="btn-open-json" title="Open last_result.json with default editor for audit">
+            <svg viewBox="0 0 24 24" class="util-icon" aria-hidden="true">
+              <path d="M16 18l6-6-6-6M8 6l-6 6 6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>JSON</span>
+          </button>
+          <button class="util-btn" id="btn-reset" title="Run a new analysis">
+            <svg viewBox="0 0 24 24" class="util-icon" aria-hidden="true">
+              <path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>Analyze another</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="verdict" class="verdict">
+      <div class="verdict-score">
+        <div class="num" id="verdict-num">—</div>
+        <div class="den">/ 100</div>
+      </div>
+      <div class="verdict-main">
+        <div class="verdict-headline">
+          <span class="verdict-icon" id="verdict-icon">—</span>
+          <span class="verdict-title" id="verdict-title">—</span>
+        </div>
+        <div class="verdict-extra" id="verdict-extra">—</div>
+        <div class="verdict-dims" id="verdict-dims"></div>
+      </div>
+    </div>
+
+    <div class="stats" style="margin-top:20px;">
+      <div class="stat"><div class="label">QS Entities</div><div class="value" id="stat-entities">—</div></div>
+      <div class="stat"><div class="label">Categories</div><div class="value" id="stat-cats">—</div></div>
+      <div class="stat"><div class="label">Critical Flags</div><div class="value" id="stat-critical" style="color:var(--danger);">—</div></div>
+      <div class="stat"><div class="label">Warnings</div><div class="value" id="stat-warnings" style="color:var(--warning);">—</div></div>
+    </div>
+
+    <!-- View switcher: QS View / BIM View -->
+    <div class="view-tabs" role="tablist">
+      <button class="view-tab active" data-view="qs"  role="tab" aria-selected="true">
+        <span class="view-tab-label">QS View</span>
+        <span class="view-tab-sub">For Quantity Surveyors</span>
+      </button>
+      <button class="view-tab"        data-view="3d"  role="tab" aria-selected="false">
+        <span class="view-tab-label">3D View</span>
+        <span class="view-tab-sub">Interactive 3D model inspection</span>
+      </button>
+      <button class="view-tab"        data-view="bim" role="tab" aria-selected="false">
+        <span class="view-tab-label">BIM View</span>
+        <span class="view-tab-sub">For BIM team — includes Element IDs</span>
+      </button>
+    </div>
+
+    <!-- ─── QS View ────────────────────────────────────────────────── -->
+    <div class="view-panels" data-view="qs">
+      <div class="panel">
+        <h2>What this means for QTO</h2>
+        <div id="qs-narrative" class="qs-narrative">—</div>
+      </div>
+
+      <div class="panel">
+        <h2>Top Blockers</h2>
+        <div id="qs-blockers" class="qs-blockers"></div>
+      </div>
+    </div>
+
+    <!-- ─── 3D View ────────────────────────────────────────────────── -->
+    <div class="view-panels hidden" data-view="3d">
+      <div class="three-d-toolbar">
+        <div class="td-left">
+          <label for="td-color-by">Show:</label>
+          <select id="td-color-by" class="td-select">
+            <option value="status" selected>QS Issues</option>
+            <option value="category">Categories</option>
+            <option value="single">Plain</option>
+          </select>
+          <label class="td-check"><input type="checkbox" id="td-show-critical" checked> CRITICAL</label>
+          <label class="td-check"><input type="checkbox" id="td-show-warning" checked> WARNING</label>
+        </div>
+        <div class="td-right">
+          <button class="ghost-mini" id="td-reset-view">Reset view</button>
+        </div>
+      </div>
+      <div class="three-d-stats" id="td-stats">3D viewer not loaded.</div>
+      <div class="three-d-body">
+        <div class="three-d-viewport" id="td-viewport">
+          <div class="three-d-loading" id="td-loading" style="display:none;">
+            <div class="td-spinner"></div>
+            <div class="td-loading-text">Loading 3D model…</div>
+          </div>
+          <div class="three-d-error" id="td-error" style="display:none;"></div>
+        </div>
+        <aside class="three-d-inspector" id="td-inspector">
+          <div class="td-inspector-empty">Click an element in the 3D view to inspect.</div>
+        </aside>
+      </div>
+      <div class="three-d-help">Drag to rotate · scroll to zoom · right-drag to pan · click to select · Shift+click to add to selection</div>
+    </div>
+
+    <!-- ─── BIM View ───────────────────────────────────────────────── -->
+    <div class="view-panels hidden" data-view="bim">
+      <div class="panel" id="m1-detail-panel">
+        <h2>Module 1 — QS Readiness Check Detail</h2>
+        <p class="muted" style="margin-bottom:12px;font-size:13px;">Element IDs can be pasted into Revit's <strong>Manage → Select by ID</strong> dialog to locate and fix each issue.</p>
+        <div id="m1-detail-list"></div>
+      </div>
+
+      <div class="panel" id="qc-panel">
+        <h2>BQ Draft — Section Summary</h2>
+        <div id="qc-list"></div>
+      </div>
+
+      <div class="panel">
+        <h2>QS Readiness Flags</h2>
+        <div id="issues"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Inventory by Category</h2>
+        <table class="inventory">
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th class="num">Count</th>
+              <th class="num">Volume Coverage</th>
+              <th class="num">Level Coverage</th>
+              <th class="num">Volume (m³)</th>
+              <th class="num">Area (m²)</th>
+            </tr>
+          </thead>
+          <tbody id="inv-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Error ─────────────────────────────────────────────────────── -->
+  <section id="state-error" class="hidden">
+    <div class="error-panel">
+      <h3 id="err-title">Something went wrong</h3>
+      <div id="err-msg" class="muted"></div>
+      <code id="err-detail"></code>
+      <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="primary" id="btn-retry-same" title="Re-run analysis on the same .rvt. Any DDC output already on disk will be reused automatically.">Retry analysis</button>
+        <button class="ghost" onclick="showState('empty')">Choose another file</button>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ── Update toast (silent startup) ──────────────────────────────────── -->
+<div id="update-toast" class="update-toast hidden" role="status" aria-live="polite">
+  <h3 id="upd-toast-title">Update available</h3>
+  <p id="upd-toast-body">A new version is ready to install.</p>
+  <div class="toast-actions">
+    <button id="upd-toast-later">Later</button>
+    <button id="upd-toast-open" class="primary">View</button>
+  </div>
+</div>
+
+<!-- ── Update modal ───────────────────────────────────────────────────── -->
+<div id="update-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true"
+     aria-labelledby="upd-modal-title">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="upd-modal-title">Updates</h2>
+      <button class="modal-close" id="upd-modal-close" aria-label="Close">×</button>
+    </div>
+    <div class="modal-body" id="upd-modal-body">
+      <div class="muted">Checking for updates…</div>
+    </div>
+    <div class="modal-footer">
+      <button id="upd-recheck" class="upd-action" style="background: transparent; border: 1px solid var(--border-2); color: var(--text-2);">Re-check</button>
+      <button id="upd-modal-done">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ── State switching ─────────────────────────────────────────────────────
+const STATES = ['empty', 'processing', 'results', 'error'];
+let jobFinished = false;
+
+function showState(name) {
+  if (name === 'empty') {
+    clearPoll();
+    if (currentEventSource) { currentEventSource.close(); currentEventSource = null; }
+    jobFinished = false;
+  }
+  for (const s of STATES) {
+    document.getElementById('state-' + s).classList.toggle('hidden', s !== name);
+  }
+}
+
+// ── Server health poll (mostly cosmetic) ──────────────────────────────────
+async function pingServer() {
+  try {
+    const r = await fetch('/api/health');
+    const ok = r.ok;
+    document.getElementById('server-status').classList.toggle('down', !ok);
+    document.getElementById('server-label').textContent = ok ? 'connected' : 'server down';
+  } catch {
+    document.getElementById('server-status').classList.add('down');
+    document.getElementById('server-label').textContent = 'server down';
+  }
+}
+pingServer();
+setInterval(pingServer, 5000);
+
+// ── File picking ──────────────────────────────────────────────────────────
+async function pickFile() {
+  if (!window.pywebview || !window.pywebview.api) {
+    alert('Desktop runtime not available. Please launch via main.py.');
+    return;
+  }
+  const path = await window.pywebview.api.pick_rvt();
+  if (path) startAnalysis(path);
+}
+
+document.getElementById('btn-pick').addEventListener('click', pickFile);
+document.getElementById('btn-reset').addEventListener('click', () => {
+  document.dispatchEvent(new CustomEvent('qsforge:newAnalysis'));
+  showState('empty');
+});
+document.getElementById('btn-cancel').addEventListener('click', cancelCurrentJob);
+document.getElementById('btn-retry-same').addEventListener('click', () => {
+  if (lastRvtPath) {
+    startAnalysis(lastRvtPath);
+  } else {
+    showState('empty');
+  }
+});
+document.getElementById('btn-open-json').addEventListener('click', openResultJson);
+document.getElementById('btn-open-bq').addEventListener('click', openBqDraft);
+document.getElementById('btn-export-pdf').addEventListener('click', exportPdf);
+
+// Track the current analysis context so we can reference it across actions.
+let currentJobId = null;
+let currentRvtName = null;
+let lastRvtPath = null;  // full path, for the "Retry analysis" button on the error page
+let currentBqDraftPath = null;
+
+async function exportPdf() {
+  const btn = document.getElementById('btn-export-pdf');
+  const orig = btn.textContent;
+
+  // Build a sensible default file name from the analyzed rvt.
+  const suggested = (currentRvtName || 'QSForge_Report').replace(/\.rvt$/i, '') + '_Report.pdf';
+
+  if (!window.pywebview || !window.pywebview.api || !window.pywebview.api.save_pdf_dialog) {
+    alert('PDF export requires the desktop app. Please run through python main.py.');
+    return;
+  }
+
+  let targetPath;
+  try {
+    targetPath = await window.pywebview.api.save_pdf_dialog(suggested);
+  } catch (e) {
+    alert('Save dialog failed: ' + e);
+    return;
+  }
+  if (!targetPath) return;  // user cancelled
+
+  btn.disabled = true;
+  btn.textContent = 'Generating PDF…';
+  try {
+    const body = { output_path: targetPath };
+    if (currentJobId) body.job_id = currentJobId;
+    const r = await fetch('/api/export_pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json();
+    if (!r.ok || !j.ok) {
+      alert('PDF generation failed: ' + (j.error || `HTTP ${r.status}`));
+      return;
+    }
+    btn.textContent = 'Opening…';
+    if (window.pywebview.api.open_path) {
+      await window.pywebview.api.open_path(j.path);
+    }
+    btn.textContent = 'PDF saved ✓';
+    setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1800);
+  } catch (e) {
+    alert('PDF export failed: ' + e);
+    btn.textContent = orig;
+    btn.disabled = false;
+  }
+}
+
+async function openResultJson() {
+  try {
+    const r = await fetch('/api/last_result_path');
+    const j = await r.json();
+    if (!j.exists) {
+      alert('No result dump found yet. Run an analysis first.');
+      return;
+    }
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.open_path) {
+      const ok = await window.pywebview.api.open_path(j.path);
+      if (!ok) alert('Could not open: ' + j.path);
+    } else {
+      // Fallback: show path for the user to copy.
+      prompt('Open this file manually:', j.path);
+    }
+  } catch (e) {
+    alert('Failed to locate last_result.json: ' + e);
+  }
+}
+
+async function openBqDraft() {
+  if (!currentBqDraftPath) return;
+  if (window.pywebview && window.pywebview.api) {
+    const opened = await window.pywebview.api.open_path(currentBqDraftPath);
+    if (!opened) await window.pywebview.api.open_in_explorer(currentBqDraftPath);
+  } else {
+    prompt('BQ Draft saved at:', currentBqDraftPath);
+  }
+}
+
+// Drag-drop visual hover; we don't extract paths here because browser File
+// objects don't expose absolute paths. Dropping prompts the native picker.
+const dz = document.getElementById('dropzone');
+['dragenter', 'dragover'].forEach(evt =>
+  dz.addEventListener(evt, e => { e.preventDefault(); dz.classList.add('hover'); }));
+['dragleave', 'drop'].forEach(evt =>
+  dz.addEventListener(evt, e => { e.preventDefault(); dz.classList.remove('hover'); }));
+dz.addEventListener('drop', () => pickFile());
+
+// ── Analysis flow ─────────────────────────────────────────────────────────
+let currentEventSource = null;
+let pollTimer = null;
+
+function clearPoll() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+async function startAnalysis(path) {
+  jobFinished = false;
+  document.dispatchEvent(new CustomEvent('qsforge:newAnalysis'));
+  showState('processing');
+  document.getElementById('proc-file').textContent = path;
+  document.getElementById('log').innerHTML = '';
+  document.getElementById('live-status').textContent = 'Preparing…';
+
+  // Re-enable Cancel for this fresh run (it's disabled after a previous cancel).
+  const cancelBtn = document.getElementById('btn-cancel');
+  if (cancelBtn) {
+    cancelBtn.disabled = false;
+    cancelBtn.textContent = 'Cancel';
+  }
+
+  const forceChk = document.getElementById('opt-force');
+  const force = !!(forceChk && forceChk.checked);
+
+  // Read the currently-checked DDC mode. Defaults to 'standard' so the
+  // pipeline still works if the picker is ever removed.
+  const modeEl = document.querySelector('input[name="ddc-mode"]:checked');
+  const mode = (modeEl && modeEl.value) || 'standard';
+
+  let job;
+  try {
+    const r = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ path, force, mode }),
+    });
+    job = await r.json();
+    if (!r.ok) throw new Error(job.error || 'analyze failed');
+  } catch (e) {
+    showError('Could not start analysis', String(e));
+    return;
+  }
+
+  currentJobId = job.job_id;
+  currentRvtName = (path.split(/[\\/]/).pop()) || null;
+  lastRvtPath = path;
+  subscribeJob(job.job_id, path);
+
+  // Fallback if SSE misses the terminal state (pywebview / buffering edge cases).
+  clearPoll();
+  pollTimer = setInterval(async () => {
+    try {
+      const r = await fetch(`/api/jobs/${job.job_id}`);
+      if (!r.ok) return;
+      const j = await r.json();
+      if (j.state === 'done' || j.state === 'error' || j.state === 'cancelled') {
+        if (jobFinished) return;
+        jobFinished = true;
+        clearPoll();
+        if (currentEventSource) { currentEventSource.close(); currentEventSource = null; }
+        if (j.state === 'done') {
+          try {
+            renderResults(j.result, path);
+          } catch (e) {
+            console.error('renderResults failed', e);
+            showError('UI render error', (e && e.stack) || String(e));
+          }
+        } else if (j.state === 'cancelled') {
+          // Go back to the empty state instead of the red error screen —
+          // cancellation is a deliberate user action, not a failure.
+          showState('empty');
+        } else {
+          showError(
+            (j.error && j.error.type) || 'Error',
+            (j.error && j.error.message) || 'Unknown error'
+          );
+        }
+      }
+    } catch { /* ignore transient network errors */ }
+  }, 2000);
+}
+
+async function cancelCurrentJob() {
+  if (!currentJobId) return;
+  const btn = document.getElementById('btn-cancel');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Cancelling…';
+  }
+  const el = document.getElementById('live-status');
+  if (el) el.textContent = 'Cancel requested — stopping DDC…';
+  try {
+    await fetch(`/api/jobs/${currentJobId}/cancel`, { method: 'POST' });
+  } catch (e) {
+    console.error('Cancel request failed', e);
+  }
+}
+
+// Messages starting with this prefix are high-frequency heartbeats from
+// ddc_runner.py. Instead of appending a new line every 2 s during a
+// 15-minute conversion, we overwrite the single "heartbeat" line in place
+// so the log stays scannable but users still see a live, moving counter.
+const HEARTBEAT_PREFIX = 'DDC \u00b7 '; // "DDC · "
+
+// Update the big live-status line under the filename on the Analyzing page.
+// We only echo heartbeats and a handful of stage-change milestones here;
+// lower-signal messages (cleanup, dump paths, …) stay only in the log.
+function updateLiveStatus(msg) {
+  const el = document.getElementById('live-status');
+  if (!el) return;
+  const m = String(msg || '');
+  if (m.startsWith(HEARTBEAT_PREFIX)) {
+    el.textContent = m.slice(HEARTBEAT_PREFIX.length);
+    return;
+  }
+  if (/^Running DDC converter/i.test(m))      el.textContent = 'Converting Revit model (DDC)…';
+  else if (/^Launching DDC/i.test(m))         el.textContent = 'Launching DDC converter…';
+  else if (/^Parsing Excel/i.test(m))         el.textContent = 'Parsing DDC output…';
+  else if (/^Running quality checks/i.test(m))el.textContent = 'Running quality checks…';
+  else if (/^Scoring/i.test(m))               el.textContent = 'Computing quality score…';
+  else if (/^Starting analysis/i.test(m))     el.textContent = 'Preparing…';
+}
+
+function appendLog(msg, ts) {
+  const log = document.getElementById('log');
+  const m = String(msg || '');
+  const t = new Date((ts || Date.now()/1000) * 1000).toLocaleTimeString();
+
+  updateLiveStatus(m);
+
+  if (m.startsWith(HEARTBEAT_PREFIX)) {
+    // Refresh or create the single live heartbeat line.
+    let line = log.querySelector('.log-line.heartbeat');
+    if (!line) {
+      line = document.createElement('div');
+      line.className = 'log-line heartbeat';
+      log.appendChild(line);
+    }
+    line.innerHTML = `<span class="ts">${t}</span>${escapeHtml(m)}`;
+    log.scrollTop = log.scrollHeight;
+    return;
+  }
+
+  // Any non-heartbeat message (milestone, error, final summary) closes the
+  // live line so it stops updating and stays in the log as a static record.
+  const live = log.querySelector('.log-line.heartbeat');
+  if (live) live.classList.remove('heartbeat');
+
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  if (/^Starting analysis/i.test(m) || /^Launching DDC/i.test(m)) {
+    line.classList.add('hl-start');
+  } else if (/^Done/i.test(m) || /success/i.test(m)) {
+    line.classList.add('hl-done');
+  } else if (/error|failed|timeout/i.test(m)) {
+    line.classList.add('hl-err');
+  }
+  line.innerHTML = `<span class="ts">${t}</span>${escapeHtml(m)}`;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+// Helper: fetch with a hard timeout. Large /api/jobs/<id> responses have been
+// seen to hang indefinitely in WebView2 on some frozen builds; we'd rather
+// abort fast and fall back to /api/last_result than leave the UI stuck.
+async function fetchWithTimeout(url, timeoutMs, init) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(new Error(`timeout after ${timeoutMs}ms`)), timeoutMs);
+  try {
+    return await fetch(url, Object.assign({}, init || {}, { signal: ctrl.signal }));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Fallback path: read last_result.json straight off disk through the server.
+// Returns a result object shaped the same way as job.result, or throws.
+async function fetchLastResultFallback() {
+  appendLog('finishJob: falling back to last_result.json…', Date.now() / 1000);
+  const r = await fetchWithTimeout('/api/last_result', 10000);
+  if (!r.ok) throw new Error(`last_result HTTP ${r.status}`);
+  return await r.json();
+}
+
+function finishJob(jobId, path) {
+  if (jobFinished) return;
+  jobFinished = true;
+  clearPoll();
+  appendLog('finishJob: fetching final result…', Date.now() / 1000);
+  return (async () => {
+    let resultObj = null;
+    let usedFallback = false;
+
+    // First try the job endpoint (it has the full result + error details).
+    try {
+      // 3 s is plenty for a healthy loopback response (typical: <300 ms).
+      // If we're past 3 s, something is wrong; bail and use the fallback.
+      const r = await fetchWithTimeout(`/api/jobs/${jobId}`, 3000);
+      if (r.ok) {
+        const final = await r.json();
+        appendLog(`finishJob: state=${final.state}, has result=${!!final.result}`,
+                  Date.now() / 1000);
+        if (final.state === 'done' && final.result) {
+          resultObj = final.result;
+        } else if (final.state === 'cancelled') {
+          // User-initiated cancel: quietly return to the empty state.
+          showState('empty');
+          return;
+        } else if (final.state !== 'done') {
+          showError(
+            (final.error && final.error.type) || 'Error',
+            (final.error && final.error.message) || 'Unknown error'
+          );
+          return;
+        }
+      } else {
+        appendLog(`finishJob: job endpoint HTTP ${r.status}, trying fallback`,
+                  Date.now() / 1000);
+      }
+    } catch (e) {
+      appendLog(`finishJob: job endpoint failed (${(e && e.message) || e}), trying fallback`,
+                Date.now() / 1000);
+    }
+
+    // Fallback: read last_result.json directly.
+    if (!resultObj) {
+      try {
+        resultObj = await fetchLastResultFallback();
+        usedFallback = true;
+      } catch (e) {
+        appendLog(`finishJob FAILED: ${(e && e.message) || e}`, Date.now() / 1000);
+        showError('Analysis finished but result could not be loaded', String(e));
+        return;
+      }
+    }
+
+    try {
+      renderResults(resultObj, path);
+      appendLog(
+        usedFallback ? 'finishJob: results rendered (fallback)'
+                     : 'finishJob: results rendered',
+        Date.now() / 1000
+      );
+    } catch (e) {
+      console.error('renderResults failed', e);
+      appendLog(`renderResults FAILED: ${(e && e.message) || e}`, Date.now() / 1000);
+      showError('UI render error', (e && e.stack) || String(e));
+    }
+  })();
+}
+
+function subscribeJob(jobId, path) {
+  if (currentEventSource) { currentEventSource.close(); }
+  const es = new EventSource(`/api/jobs/${jobId}/stream`);
+  currentEventSource = es;
+
+  es.onopen = () => {
+    /* If EventSource auto-reconnects after a finished job, drop it immediately. */
+    if (jobFinished) {
+      es.close();
+      if (currentEventSource === es) currentEventSource = null;
+    }
+  };
+
+  es.addEventListener('event', e => {
+    let data;
+    try { data = JSON.parse(e.data); }
+    catch { appendLog('(invalid progress payload)', Date.now() / 1000); return; }
+    appendLog(data.message, data.ts);
+
+    // Safety net: if we see a "Done" / error log line but the terminal `state`
+    // event somehow never arrives (buffering, missed event, etc.), trigger
+    // finish ourselves after a short delay — the polling tick would catch it
+    // too, but this reacts faster.
+    const msg = String(data.message || '');
+    if (!jobFinished && (msg.startsWith('Done') || msg.startsWith('Done —') ||
+                          msg.startsWith('DDC error') || msg.startsWith('Parser error') ||
+                          msg.startsWith('Unexpected error'))) {
+      setTimeout(() => { if (!jobFinished) finishJob(jobId, path); }, 200);
+    }
+  });
+
+  es.addEventListener('state', e => {
+    let data;
+    try { data = JSON.parse(e.data); }
+    catch { return; }
+    if (data.state === 'done' || data.state === 'error' || data.state === 'cancelled') {
+      es.close();
+      currentEventSource = null;
+      finishJob(jobId, path);
+    }
+  });
+
+  es.onerror = () => {
+    // Do not treat as fatal — polling will still pick up done/error.
+    if (currentEventSource === es) {
+      es.close();
+      currentEventSource = null;
+    }
+  };
+}
+
+// ── Rendering ─────────────────────────────────────────────────────────────
+function renderResults(data, path) {
+  switchView('qs');  // always land on QS View for a fresh analysis
+  if (window.__qsforge_setCurrentResult) window.__qsforge_setCurrentResult(data);
+  document.getElementById('res-filename').textContent = path;
+
+  const critCount = data.issues.filter(i => i.severity === 'CRITICAL').length;
+  const warnCount = data.issues.filter(i => i.severity === 'WARNING').length;
+
+  document.getElementById('stat-entities').textContent = data.file.qs_entity_count.toLocaleString();
+  document.getElementById('stat-cats').textContent     = data.categories.length.toString();
+  document.getElementById('stat-critical').textContent = critCount.toString();
+  document.getElementById('stat-warnings').textContent = warnCount.toString();
+
+  renderVerdict(data.score, critCount, warnCount);
+
+  // QS View — narrative + top blockers
+  renderQSNarrative(data);
+  renderQSBlockers(data);
+
+  // Issues
+  const issuesEl = document.getElementById('issues');
+  issuesEl.innerHTML = '';
+  if (data.issues.length === 0) {
+    issuesEl.innerHTML = '<div class="muted" style="padding:12px 0;">No issues found.</div>';
+  } else {
+    const sorted = [...data.issues].sort((a, b) => {
+      if (a.severity !== b.severity) return a.severity === 'CRITICAL' ? -1 : 1;
+      return a.category_label.localeCompare(b.category_label);
+    });
+    for (const i of sorted) {
+      const el = document.createElement('div');
+      el.className = 'issue';
+      const groups = Array.isArray(i.groups) ? i.groups : [];
+      el.innerHTML = `
+        <span class="sev-pill ${i.severity}">${i.severity}</span>
+        <div class="issue-body">
+          <div class="cat">${escapeHtml(i.category_label)}</div>
+          <div class="msg">${escapeHtml(i.message)}</div>
+          ${renderGroups(groups)}
+        </div>`;
+      issuesEl.appendChild(el);
+    }
+  }
+
+  // Module 1 element detail (BIM View)
+  renderM1Detail(data.score);
+
+  // Quality Checks (Module 2)
+  renderQualityChecks(data.module2);
+
+  // BQ Draft button — show when a draft was generated this run.
+  // When BQ generation fails (e.g. ran out of memory on a huge model), the
+  // button stays hidden but we surface the underlying error in the
+  // Quality-Checks area so the user understands WHY there's no draft.
+  const m2 = data.module2 || {};
+  const bqPath = m2.bq_draft_path || null;
+  currentBqDraftPath = bqPath;
+  const bqBtn = document.getElementById('btn-open-bq');
+  if (bqBtn) bqBtn.classList.toggle('hidden', !bqPath);
+  // Surface BQ Draft failure where the user can't miss it: just under the
+  // analyzed-file header. Remove any previous banner first.
+  document.querySelectorAll('.bq-failure-note').forEach(n => n.remove());
+  if (!bqPath && m2.error) {
+    const headerEl = document.querySelector('.result-header');
+    if (headerEl) {
+      const note = document.createElement('div');
+      note.className = 'bq-failure-note';
+      note.innerHTML =
+        '<strong>⚠️ BQ Draft generation failed.</strong> ' +
+        escapeHtml(m2.error) +
+        ' QS data and BIM Element-ID lists are still available below.';
+      headerEl.parentNode.insertBefore(note, headerEl.nextSibling);
+    }
+  }
+
+  // Module 0 QS Data button
+  const qsDataPath = (data.module0_export_path) || null;
+  let currentQsDataPath = qsDataPath;
+  const qsDataBtn = document.getElementById('btn-open-qs-data');
+  if (qsDataBtn) {
+    qsDataBtn.classList.toggle('hidden', !qsDataPath);
+    qsDataBtn.onclick = async () => {
+      if (!currentQsDataPath) return;
+      if (window.pywebview && window.pywebview.api) {
+        const ok = await window.pywebview.api.open_path(currentQsDataPath);
+        if (!ok) await window.pywebview.api.open_in_explorer(currentQsDataPath);
+      } else {
+        prompt('QS Data saved at:', currentQsDataPath);
+      }
+    };
+  }
+
+  // Inventory table
+  const tbody = document.getElementById('inv-body');
+  tbody.innerHTML = '';
+  for (const c of data.categories) {
+    const volCov   = c.is_volumetric ? c.volume.coverage_pct : null;
+    const lvlCov   = 100 - c.no_level_pct;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${escapeHtml(c.label)}${c.is_warning_category ? ' <span class="muted">· generic/mass</span>' : ''}</td>
+      <td class="num">${c.count.toLocaleString()}</td>
+      <td class="num">${volCov === null ? '<span class="muted">—</span>' : covPill(volCov)}</td>
+      <td class="num">${covPill(lvlCov)}</td>
+      <td class="num">${c.volume.total ? c.volume.total.toLocaleString(undefined, {maximumFractionDigits:1}) : '<span class="muted">—</span>'}</td>
+      <td class="num">${c.area.total   ? c.area.total.toLocaleString(undefined,   {maximumFractionDigits:1}) : '<span class="muted">—</span>'}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  showState('results');
+}
+
+// ── QS View renderers (Module 3) ──────────────────────────────────────────
+function renderQSNarrative(data) {
+  const el = document.getElementById('qs-narrative');
+  el.innerHTML = '';
+
+  const s  = data.score || {};
+  const v  = s.verdict  || {};
+  const m2 = data.module2 || {};
+  const qsTotal = (data.file && data.file.qs_entity_count) || 0;
+
+  // 1. Opening line — what this model is, dimensioned in QS terms.
+  const head = document.createElement('p');
+  head.innerHTML = `This model contains <strong>${qsTotal.toLocaleString()}</strong> QS-relevant elements across <strong>${(data.categories || []).length}</strong> categories.`;
+  el.appendChild(head);
+
+  // 2. Verdict-driven verdict narrative.
+  const code = v.code || 'UNKNOWN';
+  const p = document.createElement('p');
+  if (code === 'READY') {
+    p.innerHTML = `The model is <strong style="color:var(--success)">ready for quantity take-off</strong>. All volumetric elements have Volume and Level data, and no CAD contamination was detected. You can proceed with QTO directly.`;
+  } else if (code === 'CONDITIONAL') {
+    p.innerHTML = `The model is <strong style="color:var(--warning)">conditionally ready</strong>. QTO is possible but <strong>some categories have gaps</strong> that will require manual handling or clarification from the BIM team. Review the Top Blockers below before issuing rates.`;
+  } else if (code === 'HIGH_RISK') {
+    p.innerHTML = `This model is <strong style="color:var(--danger)">high-risk for QTO</strong>. Significant data is missing — running quantity take-off now will produce unreliable totals. We recommend returning the model to the BIM team with the Element ID lists in the BIM View, then re-submitting.`;
+  } else if (code === 'DO_NOT_USE') {
+    p.innerHTML = `This model is <strong style="color:var(--danger)">not usable</strong> for quantity take-off in its current state. Fundamental attributes (Level, Volume, Material) are absent on the majority of elements. Request a corrected model before any costing work.`;
+  } else {
+    p.textContent = 'Scoring did not complete — see the BIM View for raw checks.';
+  }
+  el.appendChild(p);
+
+  // 3. Impact call-out: extra-hours + top weaknesses (dimensions < 50).
+  if (typeof s.extra_qs_hours === 'number' && s.extra_qs_hours > 0) {
+    const weakDims = (s.dimensions || [])
+      .filter(d => d.score < 85 && d.id !== 'coordinate_system')
+      .sort((a, b) => a.score - b.score)
+      .slice(0, 2)
+      .map(d => d.label);
+
+    const callout = document.createElement('div');
+    callout.className = 'call-out ' + (v.color || '');
+    const weakHtml = weakDims.length
+      ? `Biggest weaknesses: <strong>${weakDims.map(escapeHtml).join('</strong> and <strong>')}</strong>. `
+      : '';
+    callout.innerHTML = `${weakHtml}Plan roughly <strong>+${s.extra_qs_hours} hour${s.extra_qs_hours === 1 ? '' : 's'}</strong> of extra QS effort if you proceed without a model fix.`;
+    el.appendChild(callout);
+  }
+
+  // 4. "Next step" instruction.
+  const next = document.createElement('div');
+  next.className = 'call-out';
+  const m2Crit = (m2.summary && m2.summary.critical) || 0;
+  const m2Warn = (m2.summary && m2.summary.warning) || 0;
+  if (code === 'READY') {
+    next.innerHTML = `<strong>Next step:</strong> Proceed with QTO using your standard workflow.`;
+  } else if (m2Crit + m2Warn === 0) {
+    next.innerHTML = `<strong>Next step:</strong> Review the BIM View for detail.`;
+  } else {
+    next.innerHTML = `<strong>Next step:</strong> Switch to <strong>BIM View</strong> to copy the Element IDs for the ${m2Crit} critical and ${m2Warn} warning issues. Send them to the BIM team — they can paste the IDs directly into Revit's "Select by ID" dialog.`;
+  }
+  el.appendChild(next);
+}
+
+function renderQSBlockers(data) {
+  const el = document.getElementById('qs-blockers');
+  el.innerHTML = '';
+
+  // Derive blockers from Module 1 dimension scores (preferred) or fall back to
+  // module2 checks for payloads produced by older builds.
+  const DIM_LABELS = {
+    'Level Coverage':        'Elements without floor level assignment',
+    'Volume Coverage':       'Elements with missing or zero volume',
+    'Material Completeness': 'Elements with unclassified structural material',
+    'Vertical Span':         'Multi-storey elements spanning ≥ 3 levels',
+    'Volume Anomaly':        'Elements with suspicious volume (< 0.05 m³)',
+    'Unit Consistency':      'Elements with oversized volume (possible unit error)',
+    'Non-QS Family':         'Non-QS families (Mass/Generic) carrying volume',
+  };
+
+  let ranked = [];
+  const m1 = data.score && data.score.module1_detail;
+  if (m1 && typeof m1 === 'object') {
+    ranked = Object.entries(m1)
+      .filter(([, v]) => v != null && v.score != null && v.issues > 0)
+      .map(([k, v]) => ({
+        severity: v.score < 75 ? 'CRITICAL' : 'WARNING',
+        label:    DIM_LABELS[k] || k,
+        summary:  `${v.issues.toLocaleString()} elements affected — dimension score ${Math.round(v.score)}%`,
+        total:    v.issues,
+        dim:      k,
+      }))
+      .filter(b => b.total > 0)
+      .sort((a, b) => {
+        if (a.severity !== b.severity) return a.severity === 'CRITICAL' ? -1 : 1;
+        return b.total - a.total;
+      })
+      .slice(0, 5);
+  } else {
+    // Legacy fallback: use module2 checks if module1_detail is absent
+    const checks = (data.module2 && data.module2.checks) || [];
+    ranked = checks
+      .filter(c => c.severity && c.severity !== 'OK' && (c.total || 0) > 0)
+      .sort((a, b) => (b.total || 0) - (a.total || 0))
+      .slice(0, 5);
+  }
+
+  if (ranked.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'qs-blocker none';
+    empty.textContent = 'No blocking issues detected. All QS readiness dimensions look clean.';
+    el.appendChild(empty);
+    return;
+  }
+
+  for (const c of ranked) {
+    const row = document.createElement('div');
+    row.className = 'qs-blocker';
+    row.innerHTML = `
+      <span class="sev-pill ${c.severity}">${c.severity}</span>
+      <div class="qs-blocker-body">
+        <div class="qs-blocker-title">${escapeHtml(c.label)}</div>
+        <div class="qs-blocker-detail">${escapeHtml(c.summary || '')}</div>
+      </div>
+    `;
+    const btn = document.createElement('button');
+    btn.textContent = 'See in BIM view →';
+    btn.onclick = () => switchView('bim');
+    row.appendChild(btn);
+    el.appendChild(row);
+  }
+}
+
+// ── Render a list of {family, type, count, ids} groups as collapsible rows ─
+function renderGroups(groups) {
+  if (!Array.isArray(groups) || groups.length === 0) return '';
+  const allIds = [];
+  for (const g of groups) {
+    for (const id of (g.ids || [])) allIds.push(id);
+  }
+  const dedupAll = Array.from(new Set(allIds));
+  const totalCount = groups.reduce((s, g) => s + (g.count || 0), 0);
+  const allShown = dedupAll.length < totalCount
+    ? `${dedupAll.length.toLocaleString()} of ${totalCount.toLocaleString()} IDs`
+    : `${dedupAll.length.toLocaleString()} IDs`;
+
+  const rowsHtml = groups.map(g => {
+    const fam = escapeHtml(g.family || '(no family)');
+    const typ = escapeHtml(g.type   || '(no type)');
+    const count = (g.count || 0).toLocaleString();
+    const ids  = Array.isArray(g.ids) ? g.ids : [];
+    const shown = ids.length < g.count
+      ? `${ids.length.toLocaleString()} of ${count} shown`
+      : `${ids.length.toLocaleString()} shown`;
+    const idsStr = ids.join('\n');
+    const idsChips = ids.map(id => `<span class="id-chip">${id}</span>`).join('');
+    return `
+      <details class="ft-group">
+        <summary>
+          <span class="ft-count">${count}</span>
+          <span class="ft-name"><strong>${fam}</strong> · ${typ}</span>
+        </summary>
+        <div class="ft-body">
+          <div class="ft-body-head">
+            <span class="ids-label">Element IDs — ${shown}</span>
+            <button class="btn-copy btn-copy-sm" onclick="copyToClipboard(${JSON.stringify(idsStr)})">Copy</button>
+          </div>
+          <div class="ids-grid">${idsChips}</div>
+        </div>
+      </details>`;
+  }).join('');
+
+  return `
+    <div class="ft-groups">
+      <div class="ft-groups-head">
+        <span class="ids-label">Affected by Family · Type</span>
+        <button class="btn-copy btn-copy-sm" onclick="copyToClipboard(${JSON.stringify(dedupAll.join('\n'))})">Copy all (${allShown})</button>
+      </div>
+      ${rowsHtml}
+    </div>`;
+}
+
+// ── Module 1 dimension detail with element IDs (BIM View) ─────────────────
+function renderM1Detail(scoreData) {
+  const list = document.getElementById('m1-detail-list');
+  if (!list) return;
+  list.innerHTML = '';
+
+  const detail = (scoreData || {}).module1_detail;
+  if (!detail || typeof detail !== 'object') {
+    list.innerHTML = '<div class="muted">Module 1 detail not available for this analysis.</div>';
+    return;
+  }
+
+  const DIM_DESCS = {
+    'Level Coverage':        'Elements without a floor level assigned',
+    'Volume Coverage':       'Elements with missing or zero volume',
+    'Material Completeness': 'Structural elements with unclassified material',
+    'Vertical Span':         'Vertical elements spanning 3 or more levels',
+    'Volume Anomaly':        'Elements with suspiciously small volume (< 0.05 m³)',
+    'Unit Consistency':      'Elements with oversized volume — possible unit error',
+    'Non-QS Family':         'Non-structural families (Mass / Generic) carrying volume',
+  };
+
+  let anyIssue = false;
+  for (const [dim, v] of Object.entries(detail)) {
+    if (!v || !v.issues) continue;
+    anyIssue = true;
+    const score  = v.score !== null && v.score !== undefined ? Math.round(v.score) : null;
+    const cls    = score === null ? 'warn' : score >= 90 ? 'ok' : score >= 75 ? 'warn' : 'crit';
+    const scoreLabel = score !== null ? `${score}%` : '—';
+    const total  = v.issues;
+    const groups = Array.isArray(v.groups) ? v.groups : [];
+
+    const card = document.createElement('div');
+    card.className = 'm1-dim';
+    card.innerHTML = `
+      <div class="m1-dim-header">
+        <span class="dim-score ${cls}">${scoreLabel}</span>
+        <strong>${escapeHtml(dim)}</strong>
+        <span class="muted" style="font-size:12px;">${total.toLocaleString()} element${total !== 1 ? 's' : ''} affected</span>
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:${groups.length ? '10px' : '0'};">
+        ${escapeHtml(DIM_DESCS[dim] || '')}
+      </div>
+      ${renderGroups(groups)}`;
+    list.appendChild(card);
+  }
+
+  if (!anyIssue) {
+    list.innerHTML = '<div class="muted" style="padding:8px 0;">All 7 dimensions passed — no element-level issues detected.</div>';
+  }
+}
+
+function gotoBimCheck(checkId) {
+  switchView('bim');
+  // Defer so the BIM panel is in the DOM / visible before scrolling.
+  requestAnimationFrame(() => {
+    const qc = document.getElementById('qc-list');
+    if (!qc) return;
+    // Each <details> in qc-list corresponds to one check; match by label text
+    // or, more robustly, re-render and target by order via data attribute.
+    // We'll scan children and open the matching one by its label's text.
+    const targets = qc.querySelectorAll('details.qc');
+    for (const d of targets) {
+      const title = d.querySelector('.qc-title');
+      if (!title) continue;
+      // The check label is the first line of qc-title innerText.
+      const label = title.firstChild && title.firstChild.textContent
+        ? title.firstChild.textContent.trim()
+        : '';
+      // Match by known mapping from check id → visible label.
+      if (checkLabelMatches(checkId, label)) {
+        d.open = true;
+        d.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        d.classList.add('qc-flash');
+        setTimeout(() => d.classList.remove('qc-flash'), 1500);
+        return;
+      }
+    }
+  });
+}
+
+function checkLabelMatches(checkId, label) {
+  const map = {
+    volume_coverage:        'Volume Coverage',
+    level_assignment:       'Level Assignment',
+    mass_elements:          'Mass Elements',
+    generic_models:         'Generic Models',
+    multi_storey_vertical:  'Multi-storey Vertical Elements',
+    unhosted_doors_windows: 'Unhosted Doors & Windows',
+    nested_subcomponents:   'Nested Sub-components',
+    material_by_type:       'Material by Family-Type',
+    layer_materials:        'Wall & Floor Layer Materials',
+  };
+  return (map[checkId] || '') === label;
+}
+
+// ── View switcher ─────────────────────────────────────────────────────────
+function switchView(view) {
+  document.querySelectorAll('.view-tab').forEach(tab => {
+    const active = tab.dataset.view === view;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  document.querySelectorAll('.view-panels').forEach(panel => {
+    panel.classList.toggle('hidden', panel.dataset.view !== view);
+  });
+}
+
+document.querySelectorAll('.view-tab').forEach(tab => {
+  tab.addEventListener('click', () => switchView(tab.dataset.view));
+});
+
+// Reset to QS view whenever a new analysis is rendered.
+function renderVerdict(score, critCount, warnCount) {
+  const v = document.getElementById('verdict');
+  v.classList.remove('success', 'warning', 'danger');
+
+  // Fallback if scoring failed or is missing — keep the UI usable.
+  if (!score || typeof score.overall !== 'number') {
+    const cls = critCount > 0 ? 'danger' : warnCount > 0 ? 'warning' : 'success';
+    v.classList.add(cls);
+    v.style.setProperty('--score', '0');
+    document.getElementById('verdict-num').textContent   = '—';
+    document.getElementById('verdict-icon').textContent  = cls === 'success' ? '✓' : cls === 'warning' ? '⚠' : '✗';
+    document.getElementById('verdict-title').textContent = cls === 'success' ? 'Ready for QS' : cls === 'warning' ? 'Conditionally Ready' : 'Critical issues detected';
+    document.getElementById('verdict-extra').innerHTML   = `${critCount} critical · ${warnCount} warnings (scoring unavailable)`;
+    document.getElementById('verdict-dims').innerHTML    = '';
+    return;
+  }
+
+  const verdict = score.verdict || { code: 'UNKNOWN', label: '—', icon: '—', color: 'warning' };
+  v.classList.add(verdict.color || 'warning');
+
+  // Feed the score to the conic-gradient ring via a CSS variable.
+  // Animate from 0 so the ring sweeps in — cheap but very effective polish.
+  v.style.setProperty('--score', '0');
+  requestAnimationFrame(() => {
+    // second frame so the transition actually kicks in
+    requestAnimationFrame(() => v.style.setProperty('--score', String(score.overall)));
+  });
+
+  document.getElementById('verdict-num').textContent   = score.overall;
+  document.getElementById('verdict-icon').textContent  = verdict.icon || '—';
+  document.getElementById('verdict-title').textContent = verdict.label || '—';
+
+  const hrs = score.extra_qs_hours;
+  const hrsText = (typeof hrs === 'number')
+    ? `Estimated <span class="hrs">+${hrs} hour${hrs === 1 ? '' : 's'}</span> extra QS effort to recover this model`
+    : `${critCount} critical · ${warnCount} warnings`;
+  document.getElementById('verdict-extra').innerHTML = hrsText;
+
+  const wrap = document.getElementById('verdict-dims');
+  wrap.innerHTML = '';
+  for (const d of (score.dimensions || [])) {
+    const s = Math.max(0, Math.min(100, d.score | 0));
+    const barCls = s >= 85 ? 'high' : s >= 50 ? 'mid' : 'low';
+
+    const row = document.createElement('div');
+    row.className = 'vdim';
+    row.innerHTML = `
+      <div class="vdim-label">
+        <span>${escapeHtml(d.label)}</span>
+        <span class="w">${d.weight}%</span>
+      </div>
+      <div class="vdim-bar ${barCls}"><span style="width:${s}%"></span></div>
+      <div class="vdim-val"><strong>${s}</strong>/100</div>
+    `;
+
+    // Expandable component breakdown.
+    if (Array.isArray(d.components) && d.components.length) {
+      const toggle = document.createElement('button');
+      toggle.className = 'vdim-toggle';
+      toggle.textContent = 'Show breakdown';
+      toggle.onclick = () => {
+        const expanded = row.classList.toggle('expanded');
+        toggle.textContent = expanded ? 'Hide breakdown' : 'Show breakdown';
+      };
+      const labelCell = row.querySelector('.vdim-label');
+      labelCell.appendChild(document.createElement('br'));
+      labelCell.appendChild(toggle);
+
+      const comps = document.createElement('div');
+      comps.className = 'vdim-components';
+      comps.innerHTML = d.components.map(c => `
+        <div>· ${escapeHtml(c.label)} — <strong style="color:var(--text)">${c.score}/100</strong> · weight ${c.weight}%
+        ${c.observed ? `<span style="color:var(--muted)"> (${escapeHtml(c.observed)})</span>` : ''}</div>
+      `).join('');
+      row.appendChild(comps);
+    }
+    wrap.appendChild(row);
+  }
+}
+
+function renderQualityChecks(m2) {
+  const panel = document.getElementById('qc-panel');
+  const list  = document.getElementById('qc-list');
+  list.innerHTML = '';
+
+  if (!m2 || !Array.isArray(m2.checks) || m2.checks.length === 0) {
+    panel.classList.add('hidden');
+    return;
+  }
+  panel.classList.remove('hidden');
+
+  if (m2.error) {
+    const err = document.createElement('div');
+    err.className = 'muted';
+    err.style.padding = '10px 0';
+    err.textContent = `Checks could not run: ${m2.error}`;
+    list.appendChild(err);
+    return;
+  }
+
+  for (const c of m2.checks) {
+    list.appendChild(renderOneCheck(c));
+  }
+}
+
+function renderOneCheck(c) {
+  const det = document.createElement('details');
+  det.className = 'qc';
+  // Auto-expand non-OK checks so real issues are visible at a glance.
+  if (c.severity !== 'OK') det.open = true;
+
+  const sum = document.createElement('summary');
+  sum.innerHTML = `
+    <span class="chev">▶</span>
+    <span class="sev-pill ${c.severity}">${c.severity}</span>
+    <div class="qc-title">
+      ${escapeHtml(c.label)}
+      <div class="qc-summary">${escapeHtml(c.summary || '')}</div>
+    </div>
+  `;
+  det.appendChild(sum);
+
+  const body = document.createElement('div');
+  body.className = 'qc-body';
+
+  if (c.description) {
+    const d = document.createElement('p');
+    d.className = 'description';
+    d.textContent = c.description;
+    body.appendChild(d);
+  }
+
+  const catKeys = c.by_category ? Object.keys(c.by_category) : [];
+  if (catKeys.length) {
+    const isVol = 'missing' in c.by_category[catKeys[0]];
+    const table = document.createElement('table');
+    table.className = 'qc-cat-table';
+    const head = document.createElement('thead');
+    head.innerHTML = isVol
+      ? `<tr><th>Category</th><th class="num">Missing</th><th class="num">Total</th><th class="num">%</th></tr>`
+      : `<tr><th>Category</th><th class="num">Count</th></tr>`;
+    table.appendChild(head);
+    const tb = document.createElement('tbody');
+    for (const key of catKeys) {
+      const info = c.by_category[key];
+      const tr = document.createElement('tr');
+      if (isVol) {
+        tr.innerHTML = `
+          <td>${escapeHtml(info.label)}</td>
+          <td class="num">${info.missing.toLocaleString()}</td>
+          <td class="num">${info.total.toLocaleString()}</td>
+          <td class="num">${info.pct}%</td>
+        `;
+      } else {
+        tr.innerHTML = `
+          <td>${escapeHtml(info.label)}</td>
+          <td class="num">${info.count.toLocaleString()}</td>
+        `;
+      }
+      tb.appendChild(tr);
+    }
+    table.appendChild(tb);
+    body.appendChild(table);
+  }
+
+  // Layer-material check has a type-level breakdown instead of Element IDs.
+  if (c.id === 'layer_materials' && Array.isArray(c.items_sample) && c.items_sample.length) {
+    renderLayerMaterials(c, body);
+  } else if (Array.isArray(c.items_sample) && c.items_sample.length) {
+    renderItemsPreview(c, body);
+  }
+
+  renderCheckIds(c, body);
+
+  det.appendChild(body);
+  return det;
+}
+
+// Render the "Revit Element IDs" block for one check.
+//
+// Two layouts:
+//   • categorized — if the check exposes IDs broken down by category
+//     (every check except `layer_materials` and `generic_models` does so
+//     after the Module 2 refactor), we render one collapsible <details>
+//     per category with its own copy button. This is what the BIM team
+//     usually wants — paste a clean list of "all bad Beams" into Revit's
+//     Select-by-ID dialog without having to filter by hand.
+//   • flat — fallback for the few checks where every offending element
+//     belongs to the same effective category. Mirrors the pre-refactor
+//     layout so users who liked the old "single block" view aren't
+//     surprised on those specific checks.
+function renderCheckIds(c, body) {
+  const categories = collectIdGroups(c);
+  // Detect "old payload" — by_category exists with categories, but none
+  // of them carry actual sample_ids. This happens when the JSON on disk
+  // was produced by a pre-refactor build of the analyzer. For those
+  // checks the user is better served by the flat list (which still
+  // contains every sampled ID) than by an empty per-category accordion.
+  const anyGroupHasIds = categories.some(g => g.sample_ids && g.sample_ids.length);
+  if (categories.length >= 2 && anyGroupHasIds) {
+    renderCheckIdsGrouped(c, body, categories);
+    return;
+  }
+  if (categories.length === 1 && categories[0].sample_ids.length) {
+    // One real category with IDs — still grouped to give the user
+    // category-aware labelling, but it'll only show one accordion row.
+    renderCheckIdsGrouped(c, body, categories);
+    return;
+  }
+  // Last-resort flat fallback: covers checks that only emit
+  // `element_ids_sample`, layer_materials (type-level), and any payload
+  // produced by an older analyzer that hasn't been re-run yet.
+  renderCheckIdsFlat(c, body);
+}
+
+// Build a normalised [{cat, label, count, sample_ids}] list from
+// whichever shape the backend produced for this check.
+function collectIdGroups(c) {
+  const out = [];
+  const bc = c && c.by_category;
+  if (bc && typeof bc === 'object') {
+    for (const [cat, info] of Object.entries(bc)) {
+      const samples = Array.isArray(info && info.sample_ids) ? info.sample_ids : [];
+      // Skip categories with neither IDs nor a meaningful count — these
+      // can sneak in for shape-compatible-but-empty entries.
+      const cnt = Number(info && (info.count != null ? info.count : info.missing)) || samples.length;
+      if (!samples.length && !cnt) continue;
+      out.push({
+        cat,
+        label: (info && info.label) || prettyCat(cat),
+        count: cnt,
+        sample_ids: samples,
+      });
+    }
+  }
+  // Sort biggest first so the most actionable category lands at the top.
+  out.sort((a, b) => (b.count - a.count));
+  return out;
+}
+
+function renderCheckIdsGrouped(c, body, groups) {
+  const totalAll = c.total || groups.reduce((s, g) => s + g.count, 0);
+  // Build a flat union of every per-category sample, deduped, for the
+  // master "Copy ALL" button. We don't trust c.element_ids_sample here
+  // because it may have been truncated separately from the per-category
+  // samples and so could miss some IDs that ARE present in the groups.
+  const seen = new Set();
+  const allIds = [];
+  for (const g of groups) {
+    for (const id of g.sample_ids) {
+      if (!seen.has(id)) {
+        seen.add(id);
+        allIds.push(id);
+      }
+    }
+  }
+
+  const wrap = document.createElement('div');
+  wrap.className = 'qc-ids-grouped';
+
+  const head = document.createElement('div');
+  head.className = 'qc-ids-grouped-head';
+  const truncated = totalAll > allIds.length;
+  head.innerHTML = `
+    <div>
+      <span class="label">Revit Element IDs by category</span>
+      <span class="total">${truncated
+          ? `${allIds.length.toLocaleString()} of ${totalAll.toLocaleString()} shown`
+          : `${allIds.length.toLocaleString()} total`}</span>
+    </div>
+  `;
+  if (allIds.length) {
+    const btnAll = document.createElement('button');
+    btnAll.className = 'btn-copy';
+    btnAll.textContent = 'Copy ALL';
+    btnAll.onclick = () => copyIds(btnAll, allIds);
+    head.appendChild(btnAll);
+  }
+  wrap.appendChild(head);
+
+  // Auto-open behaviour: open the largest group, plus any small group
+  // (≤ 30 IDs) so the user gets one helpful overview without the page
+  // becoming a scroll nightmare for 7+ huge categories.
+  groups.forEach((g, i) => {
+    const det = document.createElement('details');
+    det.className = 'qc-id-group';
+    if (i === 0 || g.sample_ids.length <= 30) det.open = true;
+
+    const sum = document.createElement('summary');
+    const ids = g.sample_ids;
+    const cntLabel = (ids.length < g.count)
+      ? `${ids.length.toLocaleString()} of ${g.count.toLocaleString()}`
+      : `${g.count.toLocaleString()}`;
+    // The copy button lives inside the <summary> so it's always visible
+    // even when the accordion is collapsed. event.stopPropagation()
+    // prevents a click on the button from also toggling the details.
+    sum.innerHTML = `
+      <span class="chev">▶</span>
+      <span class="cat-name" title="${escapeHtml(g.cat)}">${escapeHtml(g.label || prettyCat(g.cat))}</span>
+      <span class="cat-count">${cntLabel}</span>
+    `;
+    if (ids.length) {
+      const btn = document.createElement('button');
+      btn.className = 'btn-copy btn-copy-sm';
+      btn.textContent = 'Copy IDs';
+      btn.onclick = (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        copyIds(btn, ids);
+      };
+      sum.appendChild(btn);
+    } else {
+      // No IDs available for this category (rare — happens for the Mass
+      // synthetic categories pre-refactor). Show a placeholder so the row
+      // grid still has 4 columns.
+      const placeholder = document.createElement('span');
+      placeholder.className = 'muted';
+      placeholder.style.fontSize = '11px';
+      placeholder.textContent = '—';
+      sum.appendChild(placeholder);
+    }
+    det.appendChild(sum);
+
+    if (ids.length) {
+      const box = document.createElement('div');
+      box.className = 'qc-ids';
+      box.textContent = ids.join(', ');
+      det.appendChild(box);
+
+      if (ids.length < g.count) {
+        const note = document.createElement('div');
+        note.className = 'qc-id-group-truncnote';
+        note.textContent =
+          `Showing first ${ids.length.toLocaleString()} of ${g.count.toLocaleString()} — open the .rvt in Revit to see all of them.`;
+        det.appendChild(note);
+      }
+    }
+    wrap.appendChild(det);
+  });
+
+  body.appendChild(wrap);
+
+  if (truncated) {
+    const note = document.createElement('div');
+    note.className = 'muted';
+    note.style.fontSize = '12px';
+    note.style.marginTop = '6px';
+    note.textContent =
+      `Per-category lists are capped to keep the UI responsive. Total flagged elements: ${totalAll.toLocaleString()}.`;
+    body.appendChild(note);
+  }
+}
+
+function renderCheckIdsFlat(c, body) {
+  const ids = Array.isArray(c.element_ids_sample) ? c.element_ids_sample : [];
+  if (!ids.length) return;
+  const total = c.total || ids.length;
+  const wrap = document.createElement('div');
+
+  const header = document.createElement('div');
+  header.className = 'qc-ids-header';
+  const shown = Math.min(ids.length, total);
+  header.innerHTML = `
+    <div class="label">Revit Element IDs — showing ${shown.toLocaleString()}${total > ids.length ? ` of ${total.toLocaleString()}` : ''}</div>
+  `;
+  const btn = document.createElement('button');
+  btn.className = 'btn-copy';
+  btn.textContent = 'Copy IDs';
+  btn.onclick = () => copyIds(btn, ids);
+  header.appendChild(btn);
+
+  const box = document.createElement('div');
+  box.className = 'qc-ids';
+  box.textContent = ids.join(', ');
+
+  wrap.appendChild(header);
+  wrap.appendChild(box);
+  body.appendChild(wrap);
+
+  if (total > ids.length) {
+    const note = document.createElement('div');
+    note.className = 'muted';
+    note.style.fontSize = '12px';
+    note.style.marginTop = '6px';
+    note.textContent = `Only the first ${ids.length.toLocaleString()} IDs are shown to keep the UI responsive.`;
+    body.appendChild(note);
+  }
+}
+
+function renderItemsPreview(c, body) {
+  const items = c.items_sample;
+  const PREVIEW = 20;
+  const rows = items.slice(0, PREVIEW);
+
+  // Column set depends on the check.
+  let cols;
+  if (c.id === 'multi_storey_vertical') {
+    cols = [
+      { key: 'id',        head: 'Element ID', cls: 'mono' },
+      { key: 'category',  head: 'Category',   transform: prettyCat },
+      { key: 'type_name', head: 'Type' },
+      { key: 'base',      head: 'Base → Top', transform: (v, row) => `${escapeHtml(row.base || '—')} → ${escapeHtml(row.top || '—')}`, raw: true },
+    ];
+  } else if (c.id === 'nested_subcomponents') {
+    cols = [
+      { key: 'id',        head: 'Element ID', cls: 'mono' },
+      { key: 'category',  head: 'Category',   transform: prettyCat },
+      { key: 'type_name', head: 'Type' },
+      { key: 'host',      head: 'Host Id',    cls: 'mono small' },
+    ];
+  } else {
+    // unhosted doors / windows and any future default
+    cols = [
+      { key: 'id',        head: 'Element ID', cls: 'mono' },
+      { key: 'category',  head: 'Category',   transform: prettyCat },
+      { key: 'type_name', head: 'Type' },
+    ];
+  }
+
+  const h = document.createElement('div');
+  h.className = 'qc-items-header';
+  h.textContent = `Affected elements — showing ${rows.length} of ${items.length.toLocaleString()}`;
+  body.appendChild(h);
+
+  const table = document.createElement('table');
+  table.className = 'qc-cat-table';
+  const thead = document.createElement('thead');
+  thead.innerHTML = `<tr>${cols.map(col => `<th>${col.head}</th>`).join('')}</tr>`;
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  for (const it of rows) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = cols.map(col => {
+      const cls = col.cls ? ` class="${col.cls}"` : '';
+      let val;
+      if (col.transform) {
+        val = col.transform(it[col.key], it);
+        return `<td${cls}>${col.raw ? val : escapeHtml(String(val ?? ''))}</td>`;
+      }
+      val = it[col.key];
+      return `<td${cls}>${escapeHtml(String(val ?? ''))}</td>`;
+    }).join('');
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  body.appendChild(table);
+}
+
+function renderLayerMaterials(c, body) {
+  const rows = c.items_sample;
+  const header = document.createElement('div');
+  header.className = 'qc-items-header';
+  header.textContent = `Assembly types with missing layer materials — ${rows.length.toLocaleString()} shown`;
+  body.appendChild(header);
+
+  for (const t of rows) {
+    const det = document.createElement('details');
+    det.className = 'qc';
+    det.style.marginBottom = '8px';
+
+    const sum = document.createElement('summary');
+    sum.innerHTML = `
+      <span class="chev">▶</span>
+      <span class="sev-pill WARNING">${t.empty_layers} EMPTY</span>
+      <div class="qc-title">
+        <div>${escapeHtml(t.type_name)}</div>
+        <div class="qc-summary">${escapeHtml(prettyCat(t.category))} · ${t.element_count.toLocaleString()} element(s) · ${t.layers.length} layer(s)</div>
+      </div>
+    `;
+    det.appendChild(sum);
+
+    const sub = document.createElement('div');
+    sub.className = 'qc-layer-sub';
+    const tbl = document.createElement('table');
+    tbl.innerHTML = `
+      <thead><tr>
+        <th>Layer</th>
+        <th class="num">Filled</th>
+        <th class="num">Empty</th>
+        <th class="num">% Empty</th>
+        <th>Materials seen</th>
+      </tr></thead>
+    `;
+    const tb = document.createElement('tbody');
+    for (const l of t.layers) {
+      const tr = document.createElement('tr');
+      const emptyCls = l.empty > 0 ? ' class="num gap"' : ' class="num"';
+      const mats = (l.sample_materials || []).map(m => escapeHtml(m)).join(', ') || '—';
+      tr.innerHTML = `
+        <td>${escapeHtml(l.column)}</td>
+        <td class="num">${l.filled.toLocaleString()}</td>
+        <td${emptyCls}>${l.empty.toLocaleString()}</td>
+        <td class="num">${l.pct_empty}%</td>
+        <td class="small">${mats}</td>
+      `;
+      tb.appendChild(tr);
+    }
+    tbl.appendChild(tb);
+    sub.appendChild(tbl);
+    det.appendChild(sub);
+    body.appendChild(det);
+  }
+}
+
+function prettyCat(cat) {
+  if (!cat) return '';
+  return String(cat).replace(/^OST_/, '');
+}
+
+async function copyIds(btn, ids) {
+  const text = ids.join(',');
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Fallback for older WebView2 where Clipboard API may not be available.
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch {}
+    document.body.removeChild(ta);
+  }
+  const orig = btn.textContent;
+  btn.textContent = `Copied ${ids.length.toLocaleString()}`;
+  btn.classList.add('done');
+  setTimeout(() => { btn.textContent = orig; btn.classList.remove('done'); }, 1500);
+}
+
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch {}
+    document.body.removeChild(ta);
+  }
+}
+
+function covPill(pct) {
+  const rounded = Math.round(pct);
+  let cls = 'bad';
+  if (rounded >= 95) cls = 'ok';
+  else if (rounded >= 50) cls = 'mid';
+  return `<span class="cov ${cls}">${rounded}%</span>`;
+}
+
+function showError(title, detail) {
+  document.getElementById('err-title').textContent = title;
+  document.getElementById('err-msg').textContent = '';
+  document.getElementById('err-detail').textContent = detail;
+  showState('error');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => (
+    {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
+  ));
+}
+
+// ── Update mechanism ────────────────────────────────────────────────────
+// Uses /api/updates/* endpoints exposed by server.py + updater.py.
+// On window load we run ONE silent check that never throws — failures are
+// logged to console.debug and the UI stays calm. The header "Updates"
+// button always works for manual on-demand checks.
+const UPD = {
+  // Cached result of /api/updates/check, refreshed on each open.
+  lastCheck: null,
+  // Set to true once the user has dismissed the toast for THIS session
+  // so we don't keep re-popping it.
+  toastDismissed: false,
+  // Active download job ids by component.
+  activeJob: { qsforge: null, ddc: null },
+  pollers: {},
+};
+
+function fmtBytes(n) {
+  n = Number(n) || 0;
+  if (n <= 0) return '—';
+  if (n >= 1 << 30) return (n / (1 << 30)).toFixed(2) + ' GB';
+  if (n >= 1 << 20) return (n / (1 << 20)).toFixed(1) + ' MB';
+  if (n >= 1 << 10) return (n / (1 << 10)).toFixed(1) + ' KB';
+  return n + ' B';
+}
+
+async function checkForUpdates() {
+  try {
+    const r = await fetchWithTimeout('/api/updates/check', 20000);
+    if (!r.ok) return null;
+    return await r.json();
+  } catch (e) {
+    console.debug('updater: silent check failed', e);
+    return null;
+  }
+}
+
+function setUpdateBadge(hasUpdate, label) {
+  const btn = document.getElementById('btn-updates');
+  const lbl = document.getElementById('update-btn-label');
+  if (!btn || !lbl) return;
+  if (hasUpdate) {
+    btn.classList.add('has-update');
+    lbl.textContent = label || 'Update available';
+  } else {
+    btn.classList.remove('has-update');
+    lbl.textContent = 'Updates';
+  }
+}
+
+async function silentStartupCheck() {
+  // Wait a beat so the analyzer page is the user's first impression, not
+  // the update toast. Also gives the Flask thread time to settle.
+  await new Promise(r => setTimeout(r, 1500));
+  const result = await checkForUpdates();
+  UPD.lastCheck = result;
+  if (!result) {
+    setUpdateBadge(false);
+    return;
+  }
+  if (result.status !== 'ok') {
+    // disabled / offline / error — silent on offline & disabled, show
+    // "Updates" pill normally for error.
+    setUpdateBadge(false);
+    return;
+  }
+  const a = result.available || {};
+  const hasAny = a.qsforge || a.ddc;
+  setUpdateBadge(hasAny, hasAny ? 'Update ready' : null);
+  if (hasAny && !UPD.toastDismissed) {
+    showUpdateToast(result);
+  }
+}
+
+function showUpdateToast(result) {
+  const toast = document.getElementById('update-toast');
+  const title = document.getElementById('upd-toast-title');
+  const body = document.getElementById('upd-toast-body');
+  if (!toast) return;
+  const a = result.available || {};
+  const lat = result.latest || {};
+  const cur = result.current || {};
+  const parts = [];
+  if (a.qsforge) parts.push(`QSForge ${cur.qsforge} → ${lat.qsforge}`);
+  if (a.ddc)     parts.push(`DDC ${cur.ddc || '—'} → ${lat.ddc}`);
+  title.textContent = parts.length > 1 ? 'Updates available' : 'Update available';
+  body.textContent = parts.join(' · ');
+  toast.classList.remove('hidden');
+}
+
+function hideUpdateToast() {
+  const t = document.getElementById('update-toast');
+  if (t) t.classList.add('hidden');
+}
+
+function openUpdateModal() {
+  const m = document.getElementById('update-modal');
+  if (m) m.classList.remove('hidden');
+  renderUpdateModal('Checking for updates…');
+  // Re-check on every open so the user always sees fresh data.
+  refreshUpdateModal();
+}
+
+function closeUpdateModal() {
+  const m = document.getElementById('update-modal');
+  if (m) m.classList.add('hidden');
+}
+
+function renderUpdateModal(message) {
+  const body = document.getElementById('upd-modal-body');
+  if (body) body.innerHTML = `<div class="muted">${escapeHtml(message)}</div>`;
+}
+
+async function refreshUpdateModal() {
+  const result = await checkForUpdates();
+  UPD.lastCheck = result;
+  const body = document.getElementById('upd-modal-body');
+  if (!body) return;
+
+  if (!result) {
+    body.innerHTML = `
+      <div class="muted">Could not contact the update server. The app will keep working normally.</div>
+      <div class="upd-meta">Check your internet connection, or set the
+        <code>ARCHIQS_UPDATE_MANIFEST_URL</code> environment variable to
+        point at your own update server.</div>`;
+    return;
+  }
+
+  if (result.status === 'disabled') {
+    body.innerHTML = `
+      <div class="muted">Update checks are disabled on this machine.</div>
+      <div class="upd-meta">The environment variable
+        <code>ARCHIQS_UPDATE_MANIFEST_URL</code> is set to an empty
+        string. To re-enable updates, unset it and restart QSForge.</div>`;
+    return;
+  }
+
+  if (result.status === 'offline') {
+    body.innerHTML = `
+      <div class="muted">Cannot reach the update server right now.</div>
+      <div class="upd-meta">${escapeHtml(result.error || '')}</div>`;
+    return;
+  }
+
+  if (result.status !== 'ok') {
+    body.innerHTML = `
+      <div class="muted">Update server returned an error.</div>
+      <div class="upd-meta">${escapeHtml(result.error || 'unknown error')}</div>`;
+    return;
+  }
+
+  // status === 'ok'
+  const cur = result.current || {};
+  const lat = result.latest || {};
+  const av = result.available || {};
+
+  const componentRow = (key, label, hasUpdate) => {
+    const cv = cur[key] || '—';
+    const lv = lat[key] || '—';
+    const versionsHtml = hasUpdate
+      ? `<span class="upd-versions">${escapeHtml(cv)}<span class="new">${escapeHtml(lv)}</span></span>`
+      : `<span class="upd-versions">${escapeHtml(cv)} <span class="muted">(latest: ${escapeHtml(lv)})</span></span>`;
+    const status = hasUpdate
+      ? '<div class="upd-status warn">Update available</div>'
+      : '<div class="upd-status ok">Up to date</div>';
+    const btnHtml = hasUpdate
+      ? `<div class="upd-action"><button data-component="${key}" class="upd-update-btn">Download &amp; install</button></div>`
+      : '<div class="upd-action"></div>';
+    return `
+      <div class="upd-row" id="upd-row-${key}">
+        <div>
+          <div class="upd-name">${escapeHtml(label)}</div>
+          ${versionsHtml}
+          ${status}
+          <div class="upd-progress hidden" id="upd-progress-${key}">
+            <div class="upd-progress-bar" id="upd-progress-bar-${key}"></div>
+          </div>
+        </div>
+        ${btnHtml}
+      </div>`;
+  };
+
+  body.innerHTML = `
+    ${componentRow('qsforge', 'QSForge app', av.qsforge)}
+    ${componentRow('ddc', 'DDC converter (RvtExporter)', av.ddc)}
+    <div class="upd-meta">
+      Updates are downloaded over HTTPS and verified with SHA-256 before
+      they replace anything on disk. The previous DDC is kept in
+      <code>vendor\\ddc-backup\\</code> for one-click rollback. QSForge
+      will close itself to apply its own update; DDC is replaced in place
+      while the app stays running.
+    </div>`;
+
+  // Wire the per-component update buttons.
+  body.querySelectorAll('.upd-update-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const c = btn.getAttribute('data-component');
+      startUpdate(c).catch(e => console.error('update failed', e));
+    });
+  });
+
+  setUpdateBadge(av.qsforge || av.ddc, (av.qsforge || av.ddc) ? 'Update ready' : null);
+}
+
+async function startUpdate(component) {
+  const result = UPD.lastCheck;
+  if (!result || result.status !== 'ok' || !result.manifest) {
+    alert('Run the update check again first.');
+    return;
+  }
+  const row = document.getElementById(`upd-row-${component}`);
+  const btn = row && row.querySelector('.upd-update-btn');
+  const progressWrap = document.getElementById(`upd-progress-${component}`);
+  const progressBar = document.getElementById(`upd-progress-bar-${component}`);
+  const statusEl = row && row.querySelector('.upd-status');
+  if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
+  if (progressWrap) progressWrap.classList.remove('hidden');
+  if (progressBar) progressBar.style.width = '0%';
+
+  let job;
+  try {
+    const r = await fetch('/api/updates/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ component, manifest: result.manifest }),
+    });
+    job = await r.json();
+    if (!r.ok) throw new Error(job.error || 'download start failed');
+  } catch (e) {
+    if (statusEl) { statusEl.className = 'upd-status err'; statusEl.textContent = `Error: ${e.message || e}`; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
+    return;
+  }
+  UPD.activeJob[component] = job.job_id;
+
+  // Poll every 500 ms for progress / completion.
+  const pollEvery = 500;
+  const poller = setInterval(async () => {
+    let s;
+    try {
+      const r = await fetch(`/api/updates/jobs/${job.job_id}`);
+      if (!r.ok) return;
+      s = await r.json();
+    } catch (e) { return; }
+
+    const p = s.progress || {};
+    const total = Number(p.total || 0);
+    const done = Number(p.downloaded || 0);
+    const pct = total > 0 ? Math.min(100, (done / total) * 100) : 0;
+    if (progressBar) progressBar.style.width = `${pct}%`;
+    if (btn) {
+      const phase = (p.phase || s.state || '').toLowerCase();
+      if (phase === 'downloading') {
+        btn.textContent = `Downloading… ${pct.toFixed(0)}%  (${fmtBytes(done)} / ${fmtBytes(total)})`;
+      } else if (phase === 'verifying') {
+        btn.textContent = `Verifying… ${pct.toFixed(0)}%`;
+      } else if (phase === 'verified' || s.state === 'downloaded') {
+        btn.textContent = 'Verified — installing…';
+      }
+    }
+
+    if (s.state === 'downloaded' && s.result && s.result.artefact_path) {
+      clearInterval(poller);
+      await applyDownloadedUpdate(component, s.result.artefact_path);
+    } else if (s.state === 'error') {
+      clearInterval(poller);
+      if (statusEl) { statusEl.className = 'upd-status err'; statusEl.textContent = `Error: ${s.error || 'download failed'}`; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
+    } else if (s.state === 'cancelled') {
+      clearInterval(poller);
+      if (statusEl) { statusEl.className = 'upd-status warn'; statusEl.textContent = 'Cancelled'; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Download & install'; }
+    }
+  }, pollEvery);
+  UPD.pollers[component] = poller;
+}
+
+async function applyDownloadedUpdate(component, artefactPath) {
+  const result = UPD.lastCheck || {};
+  const lat = result.latest || {};
+  const version = lat[component];
+  const row = document.getElementById(`upd-row-${component}`);
+  const btn = row && row.querySelector('.upd-update-btn');
+  const statusEl = row && row.querySelector('.upd-status');
+
+  if (component === 'qsforge') {
+    if (statusEl) { statusEl.className = 'upd-status warn'; statusEl.textContent = 'Launching installer — QSForge will close.'; }
+    if (btn) btn.textContent = 'Installing…';
+    try {
+      const r = await fetch('/api/updates/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ component, artefact_path: artefactPath, version }),
+      });
+      const out = await r.json();
+      if (!r.ok || out.status !== 'ok') throw new Error(out.message || out.error || 'apply failed');
+    } catch (e) {
+      if (statusEl) { statusEl.className = 'upd-status err'; statusEl.textContent = `Install failed: ${e.message || e}`; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
+      return;
+    }
+    // Ask the desktop window to close so the installer can replace the .exe.
+    try {
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.quit_app) {
+        await window.pywebview.api.quit_app(1500);
+      }
+    } catch (e) { console.warn('quit_app failed', e); }
+    return;
+  }
+
+  // DDC: synchronous replacement, no window restart needed.
+  if (statusEl) { statusEl.className = 'upd-status warn'; statusEl.textContent = 'Replacing DDC files…'; }
+  if (btn) btn.textContent = 'Installing…';
+  try {
+    const r = await fetch('/api/updates/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ component, artefact_path: artefactPath, version }),
+    });
+    const out = await r.json();
+    if (!r.ok || out.status !== 'ok') {
+      if (out.status === 'blocked') {
+        if (statusEl) { statusEl.className = 'upd-status warn'; statusEl.textContent = out.message; }
+      } else {
+        if (statusEl) { statusEl.className = 'upd-status err'; statusEl.textContent = `Install failed: ${out.message || 'unknown error'}`; }
+      }
+      if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
+      return;
+    }
+    if (statusEl) { statusEl.className = 'upd-status ok'; statusEl.textContent = `Updated to ${version}.`; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Installed'; }
+    setUpdateBadge(false);
+  } catch (e) {
+    if (statusEl) { statusEl.className = 'upd-status err'; statusEl.textContent = `Install failed: ${e.message || e}`; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
+  }
+}
+
+// Wire UI controls.
+window.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('btn-updates');
+  if (btn) btn.addEventListener('click', openUpdateModal);
+
+  const closeBtn = document.getElementById('upd-modal-close');
+  if (closeBtn) closeBtn.addEventListener('click', closeUpdateModal);
+  const doneBtn = document.getElementById('upd-modal-done');
+  if (doneBtn) doneBtn.addEventListener('click', closeUpdateModal);
+  const recheck = document.getElementById('upd-recheck');
+  if (recheck) recheck.addEventListener('click', () => {
+    renderUpdateModal('Checking for updates…');
+    refreshUpdateModal();
+  });
+  // Click outside the modal box to close (but not on the box itself).
+  const backdrop = document.getElementById('update-modal');
+  if (backdrop) backdrop.addEventListener('click', (e) => {
+    if (e.target === backdrop) closeUpdateModal();
+  });
+
+  const tLater = document.getElementById('upd-toast-later');
+  if (tLater) tLater.addEventListener('click', () => {
+    UPD.toastDismissed = true;
+    hideUpdateToast();
+  });
+  const tOpen = document.getElementById('upd-toast-open');
+  if (tOpen) tOpen.addEventListener('click', () => {
+    hideUpdateToast();
+    openUpdateModal();
+  });
+
+  // Kick off the silent startup check.
+  silentStartupCheck();
+});
+</script>
+
+<script type="module">
+import { Viewer3D } from '/static/js/viewer3d.js';
+
+let viewer3d = null;
+let currentResult = null;
+
+// Capture the result whenever renderResults runs. Hook in via a global
+// variable that index.html's existing renderResults() should set.
+window.__qsforge_setCurrentResult = (data) => { currentResult = data; };
+
+async function ensureViewerLoaded() {
+  if (viewer3d) return;
+  const container = document.getElementById('td-viewport');
+  const loading = document.getElementById('td-loading');
+  const errorEl = document.getElementById('td-error');
+  const stats = document.getElementById('td-stats');
+  errorEl.style.display = 'none';
+
+  // Distinct reasons we can short-circuit BEFORE creating a Viewer3D.
+  // (These are all "the data isn't there" — not a viewer bug.)
+  const m3 = (currentResult && currentResult.module3) || null;
+  if (!currentResult) {
+    show3DPlaceholder(errorEl, '📂', 'No analysis loaded',
+      'Analyze a .rvt file first, then come back to this tab.');
+    return;
+  }
+  if (!m3 || !m3.dae_path) {
+    show3DPlaceholder(errorEl, '⚠️', '3D preview not available',
+      'DDC did not produce a 3D file for this model. ' +
+      'See the analysis log for details. QS View and BIM View are still available.');
+    return;
+  }
+  // DDC produced a DAE but it has no geometry — a real failure mode for
+  // drawing/annotation views and 2D-only Revit files. Module 3 reports it.
+  if (m3.element_count === 0) {
+    show3DPlaceholder(errorEl, '📐', 'This model has no 3D geometry',
+      'DDC could not extract any 3D meshes. Common causes: ' +
+      'the .rvt is a drawing/sheet view, a family library file, or ' +
+      'contains only 2D annotations. QS data and BQ Draft are still available ' +
+      'on the QS / BIM views.');
+    return;
+  }
+  // Warn about huge DAEs but let the user override. ColladaLoader is
+  // synchronous and big files lock the UI for minutes during parse, but
+  // for users who insist on seeing the model that's their call.
+  const MAX_DAE_BYTES = 500 * 1024 * 1024;  // 500 MB — hard cap
+  const WARN_DAE_BYTES = 200 * 1024 * 1024; // 200 MB — show "this may take a while"
+  const sz = m3.file_size_bytes || 0;
+  if (sz > MAX_DAE_BYTES) {
+    const mb = (sz / (1024 * 1024)).toFixed(0);
+    show3DPlaceholder(errorEl, '🐘',
+      `Model too large for in-app 3D preview (${mb} MB)`,
+      'Loading this 3D file in the browser would freeze the app for many ' +
+      'minutes and likely run out of memory. QS View and BIM View still give ' +
+      'you the full quality report and Element-ID lists. For a true 3D ' +
+      'inspection, open the .dae file directly in CADAssistant (free, ' +
+      'https://www.opencascade.com/cadassistant).');
+    return;
+  }
+  if (sz > WARN_DAE_BYTES && !window.__qsforge_3d_loadConfirmed) {
+    const mb = (sz / (1024 * 1024)).toFixed(0);
+    showLargeModelPrompt(errorEl, mb);
+    return;
+  }
+  // From here on, even on next tab visit, don't keep nagging the user.
+  window.__qsforge_3d_loadConfirmed = true;
+
+  loading.style.display = 'flex';
+  try {
+    viewer3d = new Viewer3D(container, {
+      onPick: (selection) => renderInspector(selection),
+    });
+    const stat = await viewer3d.load(`/api/3d/current`, currentResult);
+
+    // Belt-and-braces: even if the file *said* it had elements, after the
+    // Element-ID numeric filter we may end up with zero renderable meshes.
+    if (stat.elementCount === 0) {
+      try { viewer3d.dispose(); } catch (_) {}
+      viewer3d = null;
+      show3DPlaceholder(errorEl, '📐', 'No QS elements with 3D geometry',
+        'The DAE has nodes but none match Revit Element IDs we can render. ' +
+        'Use QS View and BIM View instead.');
+      return;
+    }
+
+    const d = stat.diagnostics || {};
+    let statsLine = `Loaded: ${stat.elementCount.toLocaleString()} elements · `
+      + `${(stat.triangleCount / 1e6).toFixed(1)} M triangles`;
+    if (d.modelSize) statsLine += ` · model ${d.modelSize} m`;
+    if (!currentResult.module3.has_element_ids) statsLine += ' · element-ID matching disabled';
+    // Warn when DDC produced very sparse geometry (a known failure mode
+    // for some .rvts — usually means the source had limited 3D content
+    // and most of the model is annotations or 2D detail).
+    if (stat.elementCount > 0 && stat.elementCount < 200 && stat.triangleCount < 50000) {
+      statsLine += ' · ⚠️ very sparse geometry — model may appear nearly empty';
+    }
+    stats.textContent = statsLine;
+    renderFilterList();
+    renderInspector(null);
+  } catch (e) {
+    console.error(e);
+    show3DPlaceholder(errorEl, '⚠️', 'Could not load 3D preview',
+      String(e.message || e));
+  } finally {
+    loading.style.display = 'none';
+  }
+}
+
+function show3DPlaceholder(errorEl, icon, title, body) {
+  errorEl.innerHTML =
+    '<div style="text-align:center; padding:32px; max-width:480px;">' +
+    '<div style="font-size:42px; margin-bottom:14px;">' + icon + '</div>' +
+    '<div style="font-weight:600; font-size:15px; margin-bottom:8px;">' +
+      escapeHtmlSafe(title) + '</div>' +
+    '<div style="color:var(--muted); font-size:13px; line-height:1.5;">' +
+      escapeHtmlSafe(body) + '</div>' +
+    '</div>';
+  errorEl.style.display = 'flex';
+}
+
+function showLargeModelPrompt(errorEl, mb) {
+  errorEl.innerHTML =
+    '<div style="text-align:center; padding:32px; max-width:480px;">' +
+    '<div style="font-size:42px; margin-bottom:14px;">⚠️</div>' +
+    '<div style="font-weight:600; font-size:15px; margin-bottom:8px;">' +
+      'Large 3D model (' + mb + ' MB)</div>' +
+    '<div style="color:var(--muted); font-size:13px; line-height:1.5; margin-bottom:18px;">' +
+      'Loading this model may freeze the app for 1–3 minutes and use ' +
+      'significant RAM. The QS / BIM views work normally.</div>' +
+    '<div style="display:flex; gap:8px; justify-content:center;">' +
+      '<button class="ghost-mini" id="td-load-anyway" style="padding:8px 14px;">Load anyway</button>' +
+    '</div></div>';
+  errorEl.style.display = 'flex';
+  const btn = errorEl.querySelector('#td-load-anyway');
+  if (btn) btn.addEventListener('click', () => {
+    window.__qsforge_3d_loadConfirmed = true;
+    errorEl.style.display = 'none';
+    errorEl.innerHTML = '';
+    // Retry the load.
+    ensureViewerLoaded();
+  });
+}
+
+// ── Search + Filter panels at top of inspector ──────────────────────
+function renderFilterList() {
+  const inspector = document.getElementById('td-inspector');
+  if (!inspector || !viewer3d) return;
+
+  // Search box (always-on)
+  let searchBox = document.getElementById('td-search-box');
+  if (!searchBox) {
+    searchBox = document.createElement('div');
+    searchBox.id = 'td-search-box';
+    searchBox.className = 'td-search';
+    searchBox.innerHTML =
+      '<input type="search" id="td-search-input" placeholder="Search by ID or family name…" autocomplete="off">' +
+      '<div class="td-search-hint" id="td-search-hint"></div>';
+    inspector.appendChild(searchBox);
+    const input = searchBox.querySelector('#td-search-input');
+    let _searchTimer = null;
+    input.addEventListener('input', () => {
+      clearTimeout(_searchTimer);
+      _searchTimer = setTimeout(() => runSearch(input.value), 200);
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') runSearch(input.value, /*frame*/ true);
+      if (e.key === 'Escape') { input.value = ''; runSearch(''); }
+    });
+  }
+
+  // Filter by Category
+  buildFilterPanel('td-filter-cat', 'Filter by category',
+                   viewer3d.getCategoryCounts(),
+                   (name, vis) => viewer3d.setCategoryVisibility(name, vis));
+  // Filter by Level
+  buildFilterPanel('td-filter-lvl', 'Filter by level',
+                   viewer3d.getLevelCounts(),
+                   (name, vis) => viewer3d.setLevelVisibility(name, vis));
+}
+
+function buildFilterPanel(id, title, counts, onChange) {
+  const inspector = document.getElementById('td-inspector');
+  if (!inspector) return;
+  let panel = document.getElementById(id);
+  if (!panel) {
+    panel = document.createElement('details');
+    panel.id = id;
+    panel.className = 'td-filters';
+    panel.open = true;
+    panel.innerHTML = '<summary>' + escapeHtmlSafe(title) +
+      ' <span class="td-filter-actions">' +
+      '  <button class="td-filter-btn" data-action="all">All</button>' +
+      '  <button class="td-filter-btn" data-action="none">None</button>' +
+      ' </span></summary><div class="td-filter-list"></div>';
+    inspector.appendChild(panel);
+    panel.querySelector('summary').addEventListener('click', (ev) => {
+      // Stop the toggle when clicking the All/None buttons
+      const btn = ev.target.closest('.td-filter-btn');
+      if (!btn) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const action = btn.dataset.action;
+      panel.querySelectorAll('input[type=checkbox]').forEach((cb) => {
+        cb.checked = (action === 'all');
+        cb.dispatchEvent(new Event('change', { bubbles: false }));
+      });
+    });
+  }
+  const list = panel.querySelector('.td-filter-list');
+  list.innerHTML = '';
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  for (const [name, count] of sorted) {
+    const safe = (id + '-' + name).replace(/\W/g, '_');
+    const row = document.createElement('label');
+    row.className = 'td-filter-row';
+    row.innerHTML =
+      '<input type="checkbox" id="' + safe + '" checked>' +
+      '<span class="td-filter-name" title="' + escapeHtmlSafe(name) + '">' + escapeHtmlSafe(name) + '</span>' +
+      '<span class="td-filter-count">' + count.toLocaleString() + '</span>';
+    row.querySelector('input').addEventListener('change', (e) => {
+      onChange(name, e.target.checked);
+    });
+    list.appendChild(row);
+  }
+}
+
+function runSearch(query, frame) {
+  if (!viewer3d) return;
+  const hint = document.getElementById('td-search-hint');
+  if (!query || !query.trim()) {
+    if (hint) hint.textContent = '';
+    return;
+  }
+  const matches = viewer3d.search(query);
+  if (matches.length === 0) {
+    if (hint) hint.textContent = 'No match';
+    return;
+  }
+  if (hint) {
+    hint.textContent = matches.length === 1
+      ? '1 match'
+      : matches.length.toLocaleString() + ' matches';
+  }
+  // Replace selection with all matches; frame on first if requested.
+  viewer3d.setSelected(null);  // clear
+  for (const id of matches.slice(0, 200)) {  // cap to avoid pathological selections
+    viewer3d.setSelected(id, /*additive*/ true);
+  }
+  if (frame || matches.length === 1) viewer3d.frameOn(matches.slice(0, 200));
+  renderInspector(viewer3d.getSelection());
+}
+
+// ── Inspector: 0 / 1 / many element states ───────────────────────────
+function renderInspector(selection) {
+  const inspector = document.getElementById('td-inspector');
+  if (!inspector) return;
+
+  // Tear down inspect body but preserve search + filter panels at the top.
+  const search = document.getElementById('td-search-box');
+  const fCat = document.getElementById('td-filter-cat');
+  const fLvl = document.getElementById('td-filter-lvl');
+  inspector.innerHTML = '';
+  if (search) inspector.appendChild(search);
+  if (fCat) inspector.appendChild(fCat);
+  if (fLvl) inspector.appendChild(fLvl);
+
+  const ids = Array.isArray(selection) ? selection
+            : (selection ? [selection] : []);
+
+  const insp = document.createElement('div');
+  insp.id = 'td-inspect-body';
+  insp.className = 'td-inspect-body';
+
+  if (ids.length === 0) {
+    insp.innerHTML = '<div class="td-inspector-empty">Click an element to inspect.<br>Shift+click to add to selection.</div>';
+    inspector.appendChild(insp);
+    return;
+  }
+
+  if (ids.length === 1) {
+    insp.innerHTML = renderSingleInspector(ids[0]);
+    inspector.appendChild(insp);
+    // Wire the Copy ID button (avoid inline onclick → CSP-safer)
+    const btn = insp.querySelector('[data-action="copy-id"]');
+    if (btn) btn.addEventListener('click', () =>
+      navigator.clipboard.writeText(btn.dataset.id));
+    return;
+  }
+
+  // Multi-selection: aggregate quantities
+  insp.innerHTML = renderMultiInspector(ids);
+  inspector.appendChild(insp);
+  const clearBtn = insp.querySelector('[data-action="clear-selection"]');
+  if (clearBtn) clearBtn.addEventListener('click', () => {
+    if (viewer3d) viewer3d.setSelected(null);
+    renderInspector([]);
+  });
+  const copyBtn = insp.querySelector('[data-action="copy-ids"]');
+  if (copyBtn) copyBtn.addEventListener('click', () =>
+    navigator.clipboard.writeText(ids.join('\n')));
+}
+
+function renderSingleInspector(elementId) {
+  const meta = viewer3d ? viewer3d.getElementMeta(elementId) : null;
+  const raw = meta ? meta.raw : null;
+  const detail = (currentResult && currentResult.score && currentResult.score.module1_detail) || {};
+  const flaggedDims = [];
+  for (const [dim, info] of Object.entries(detail)) {
+    for (const g of (info.groups || [])) {
+      if ((g.ids || []).map(String).includes(String(elementId))) {
+        flaggedDims.push({ dim, score: info.score });
+        break;
+      }
+    }
+  }
+  let html = '<div class="td-insp-section-title">Element</div>';
+  html += row('Element ID', elementId);
+  if (raw) {
+    html += row('Category', raw.Category || raw.category);
+    html += row('Family',   raw.Family   || raw.family);
+    html += row('Type',     raw['Type Name'] || raw.type);
+    html += row('Level',    raw.Level    || raw.level);
+    const fmtN = (n, suffix) => (n != null && !isNaN(n)) ? Number(n).toFixed(2) + suffix : null;
+    html += row('Volume',    fmtN(raw['Volume (m³)']    || raw.volume,     ' m³'));
+    html += row('Area',      fmtN(raw['Area (m²)']      || raw.area,       ' m²'));
+    html += row('Length',    fmtN(raw['Length (m)']     || raw.length,     ' m'));
+    html += row('Width',     fmtN(raw['Width (mm)']     || raw.width,      ' mm'));
+    html += row('Thickness', fmtN(raw['Thickness (mm)'] || raw.thickness,  ' mm'));
+    html += row('Material',  raw['Structural Material'] || raw.material);
+    if (raw.Data_Quality) html += row('Data Quality', raw.Data_Quality);
+  } else {
+    html += row('Status', 'Non-QS element');
+  }
+  for (const f of flaggedDims) {
+    const sevCls = f.score < 75 ? '' : 'warning';
+    html += '<div class="td-insp-issue ' + sevCls + '">'
+         + escapeHtmlSafe(f.dim) + ' — score ' + Math.round(f.score) + '%</div>';
+  }
+  html += '<div class="td-insp-actions">'
+       + '<button class="ghost-mini" data-action="copy-id" data-id="' + elementId + '">Copy ID</button>'
+       + '</div>';
+  return html;
+}
+
+function renderMultiInspector(ids) {
+  // Aggregate Volume / Area / Length and group counts by Category and Family.
+  let totalVol = 0, totalArea = 0, totalLen = 0;
+  let qsCount = 0, nonQsCount = 0;
+  const byCat = {};   // cat → { count, vol }
+  const byFamType = {}; // "Family — Type" → { count, vol }
+
+  for (const id of ids) {
+    const meta = viewer3d ? viewer3d.getElementMeta(id) : null;
+    if (!meta || !meta.raw) { nonQsCount++; continue; }
+    qsCount++;
+    const raw = meta.raw;
+    const v = Number(raw['Volume (m³)']);
+    const a = Number(raw['Area (m²)']);
+    const l = Number(raw['Length (m)']);
+    if (!isNaN(v)) totalVol += v;
+    if (!isNaN(a)) totalArea += a;
+    if (!isNaN(l)) totalLen += l;
+
+    const cat = meta.category || '(no category)';
+    if (!byCat[cat]) byCat[cat] = { count: 0, vol: 0 };
+    byCat[cat].count++;
+    if (!isNaN(v)) byCat[cat].vol += v;
+
+    const ft = (meta.family || '?') + ' — ' + (meta.type || '?');
+    if (!byFamType[ft]) byFamType[ft] = { count: 0, vol: 0 };
+    byFamType[ft].count++;
+    if (!isNaN(v)) byFamType[ft].vol += v;
+  }
+
+  const fmt = (n, suffix) => (n != null && !isNaN(n)) ? Number(n).toFixed(2) + suffix : '—';
+
+  let html = '<div class="td-insp-section-title">' + ids.length.toLocaleString() + ' elements selected</div>';
+  if (nonQsCount > 0) {
+    html += '<div class="td-insp-note">'
+         + qsCount.toLocaleString() + ' QS · '
+         + nonQsCount.toLocaleString() + ' Non-QS</div>';
+  }
+  html += row('Total Volume', fmt(totalVol, ' m³'));
+  html += row('Total Area',   fmt(totalArea, ' m²'));
+  html += row('Total Length', fmt(totalLen, ' m'));
+
+  html += '<div class="td-insp-section-title" style="margin-top:14px">By Category</div>';
+  const catRows = Object.entries(byCat).sort((a, b) => b[1].count - a[1].count);
+  for (const [name, agg] of catRows) {
+    html += '<div class="td-insp-grouprow">'
+         + '<span class="td-insp-name">' + escapeHtmlSafe(name) + '</span>'
+         + '<span class="td-insp-c">' + agg.count.toLocaleString() + '</span>'
+         + '<span class="td-insp-v">' + fmt(agg.vol, ' m³') + '</span>'
+         + '</div>';
+  }
+
+  html += '<div class="td-insp-section-title" style="margin-top:14px">By Family · Type</div>';
+  const ftRows = Object.entries(byFamType).sort((a, b) => b[1].count - a[1].count).slice(0, 25);
+  for (const [name, agg] of ftRows) {
+    html += '<div class="td-insp-grouprow">'
+         + '<span class="td-insp-name" title="' + escapeHtmlSafe(name) + '">' + escapeHtmlSafe(name) + '</span>'
+         + '<span class="td-insp-c">' + agg.count.toLocaleString() + '</span>'
+         + '<span class="td-insp-v">' + fmt(agg.vol, ' m³') + '</span>'
+         + '</div>';
+  }
+  if (Object.keys(byFamType).length > 25) {
+    html += '<div class="td-insp-note">… and ' + (Object.keys(byFamType).length - 25) + ' more</div>';
+  }
+
+  html += '<div class="td-insp-actions">'
+       + '<button class="ghost-mini" data-action="copy-ids">Copy ' + ids.length + ' IDs</button>'
+       + '<button class="ghost-mini" data-action="clear-selection">Clear selection</button>'
+       + '</div>';
+  return html;
+}
+
+function row(label, value) {
+  if (value == null || value === '') return '';
+  return '<div class="td-insp-row">'
+       + '<span class="td-insp-label">' + escapeHtmlSafe(label) + '</span>'
+       + '<span class="td-insp-value">' + escapeHtmlSafe(String(value)) + '</span>'
+       + '</div>';
+}
+
+function escapeHtmlSafe(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// Hook the existing tab switcher to lazy-init the viewer on first 3D click
+document.querySelectorAll('.view-tab').forEach((tab) => {
+  if (tab.dataset.view === '3d') {
+    tab.addEventListener('click', () => {
+      ensureViewerLoaded();
+    });
+  }
+});
+
+// Toolbar wiring
+document.getElementById('td-color-by')?.addEventListener('change', (e) => {
+  if (viewer3d) viewer3d.setColorMode(e.target.value);
+});
+document.getElementById('td-show-critical')?.addEventListener('change', (e) => {
+  if (viewer3d) viewer3d.toggleSeverity('CRITICAL', e.target.checked);
+});
+document.getElementById('td-show-warning')?.addEventListener('change', (e) => {
+  if (viewer3d) viewer3d.toggleSeverity('WARNING', e.target.checked);
+});
+document.getElementById('td-reset-view')?.addEventListener('click', () => {
+  if (viewer3d) viewer3d.resetView();
+});
+
+// Reset viewer state on new analysis
+document.addEventListener('qsforge:newAnalysis', () => {
+  if (viewer3d) {
+    viewer3d.dispose();
+    viewer3d = null;
+  }
+  document.getElementById('td-stats').textContent = '3D viewer not loaded.';
+  document.getElementById('td-inspector').innerHTML = '<div class="td-inspector-empty">Click an element in the 3D view to inspect.</div>';
+});
+</script>
+
+</body>
+</html>
