@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <created>2026-05-08T00:00:00</created>
+    <modified>2026-05-08T00:00:00</modified>
+    <unit name="meter" meter="1"/>
+    <up_axis>Z_UP</up_axis>
+  </asset>
+  <library_geometries>
+    <geometry id="g1"><mesh><vertices id="v1"><input semantic="POSITION" source="#s1"/></vertices></mesh></geometry>
+  </library_geometries>
+  <library_visual_scenes>
+    <visual_scene id="scene">
+      <node id="element_1890568" name="1890568" type="NODE"><instance_geometry url="#g1"/></node>
+      <node id="element_1890569" name="1890569" type="NODE"><instance_geometry url="#g1"/></node>
+      <node id="element_1890570" name="1890570" type="NODE"><instance_geometry url="#g1"/></node>
+      <node id="element_1890571" name="1890571" type="NODE"><instance_geometry url="#g1"/></node>
+      <node id="element_1890572" name="1890572" type="NODE"><instance_geometry url="#g1"/></node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene><instance_visual_scene url="#scene"/></scene>
+</COLLADA>
