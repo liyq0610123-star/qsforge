@@ -1,0 +1,14 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>three.js smoke test</title></head>
+<body>
+<script type="module">
+  import * as THREE from './three.module.min.js';
+  import { ColladaLoader } from './ColladaLoader.js';
+  import { OrbitControls } from './OrbitControls.js';
+  import { mergeGeometries } from './BufferGeometryUtils.js';
+  document.body.textContent = 'three.js loaded: ' + THREE.REVISION
+    + ' | ColladaLoader: ' + (typeof ColladaLoader)
+    + ' | OrbitControls: ' + (typeof OrbitControls)
+    + ' | mergeGeometries: ' + (typeof mergeGeometries);
+</script>
+</body></html>

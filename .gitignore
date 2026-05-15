@@ -30,6 +30,16 @@ qsforge_rvtexporter_last.txt
 # ── Test fixtures too large for GitHub (>100 MB hard limit) ─────────────────
 tests/*.rvt
 tests/last_result.json
+tests/*.xlsx
+tests/*.archiqs-mode
+tests/*.qsforge-mode
+
+# ── Third-party binaries bundled at build time, not in source ───────────────
+# DDC RvtExporter (~600 MB) is copied into vendor/ddc/ by build.ps1 from the
+# path in $env:QSFORGE_DDC_SOURCE. We never commit it — it's a separately-
+# licensed third-party tool and would balloon the repo past GitHub's limits.
+# Anchored to repo root so static/vendor/ (vendored three.js) stays tracked.
+/vendor/
 
 # ── Cleanup staging ─────────────────────────────────────────────────────────
 _to_delete/
