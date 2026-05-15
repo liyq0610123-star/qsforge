@@ -15,10 +15,18 @@ breaking the rest of the pipeline.
 """
 from __future__ import annotations
 
+import logging
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List
+
+_log = logging.getLogger("qsforge.module3")
+
+
+class Module3ConversionError(RuntimeError):
+    """Raised when DAE→GLB conversion fails. Caught by ``run()``."""
+
 
 # COLLADA's default namespace; element names in ET include this prefix.
 _NS = "{http://www.collada.org/2005/11/COLLADASchema}"
@@ -182,3 +190,52 @@ def _patch_dae_id_to_name(path: Path, warnings: List[str]) -> None:
         warnings.append(f"Patched {total:,} <node> tags: id → name (Element IDs now visible to viewer).")
     except OSError as e:
         warnings.append(f"DAE id→name patch could not write file: {e}")
+
+
+def _convert_dae_to_glb(dae_path: Path) -> Path:
+    """Convert ``dae_path`` to GLB next to the source. Returns the GLB path.
+
+    Imports trimesh lazily so the module remains importable even if trimesh
+    is missing (CI without the dep, dev sandbox, etc.). The frozen EXE always
+    has trimesh bundled — see qsforge.spec hidden imports.
+
+    Raises Module3ConversionError on any conversion failure with the
+    underlying exception message attached.
+    """
+    glb_path = dae_path.with_suffix(".glb")
+    if not dae_path.is_file():
+        raise Module3ConversionError(f"DAE not found: {dae_path}")
+    try:
+        import trimesh  # local import to avoid hard dep at module load
+    except ImportError as e:
+        raise Module3ConversionError(
+            f"trimesh not available — DAE→GLB conversion impossible: {e}"
+        ) from e
+
+    try:
+        scene = trimesh.load(str(dae_path), force="scene")
+    except Exception as e:
+        raise Module3ConversionError(
+            f"trimesh failed to load DAE {dae_path.name}: {e}"
+        ) from e
+
+    try:
+        glb_bytes = scene.export(file_type="glb")
+    except Exception as e:
+        raise Module3ConversionError(
+            f"trimesh failed to export GLB for {dae_path.name}: {e}"
+        ) from e
+
+    if not glb_bytes:
+        raise Module3ConversionError(
+            f"trimesh produced an empty GLB for {dae_path.name}"
+        )
+
+    try:
+        glb_path.write_bytes(glb_bytes)
+    except OSError as e:
+        raise Module3ConversionError(
+            f"Could not write GLB to {glb_path}: {e}"
+        ) from e
+
+    return glb_path
