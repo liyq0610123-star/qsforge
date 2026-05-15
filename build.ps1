@@ -1,8 +1,8 @@
 ﻿<#
-ArchiQS - Build script
+QSForge - Build script
 
 Produces a distributable one-folder PyInstaller build at:
-    dist\ArchiQS\ArchiQS.exe
+    dist\QSForge\QSForge.exe
 
 Usage:
     .\build.ps1            # clean build
@@ -11,16 +11,16 @@ Usage:
                              first-launch crashes); production build is
                              console-less.
 
-Tip: if SmartScreen warns the first time you run ArchiQS.exe, click
+Tip: if SmartScreen warns the first time you run QSForge.exe, click
 "More info" -> "Run anyway". The exe is unsigned by design.
 #>
 param(
     [switch]$Run,
     [switch]$Console,
-    # Override the DDC source folder. Default: ARCHIQS_DDC_SOURCE env var,
+    # Override the DDC source folder. Default: QSFORGE_DDC_SOURCE env var,
     # or the path used during development. Point this at the folder that
     # CONTAINS RvtExporter.exe (i.e. DDC_CONVERTER_REVIT\) — the whole
-    # folder is copied into dist\ArchiQS\vendor\ddc\ so end users don't
+    # folder is copied into dist\QSForge\vendor\ddc\ so end users don't
     # need to install DDC separately.
     # DDC source folder. Set $env:QSFORGE_DDC_SOURCE or pass -DdcSource explicitly.
     # If empty, the build will skip DDC bundling and warn the user.
@@ -31,7 +31,7 @@ param(
     # Skip copying DDC into the bundle (for faster dev rebuilds when you
     # already have a previous full build you can test against).
     [switch]$NoDdc,
-    # DDC version stamp written into vendor\ddc\.archiqs-ddc-version.
+    # DDC version stamp written into vendor\ddc\.qsforge-ddc-version.
     # The updater compares this against the manifest at runtime to decide
     # whether a newer DDC is available. Default: read from _version.py
     # so build.ps1 + the running app + the installer all stay in sync.
@@ -49,7 +49,7 @@ $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $ErrorActionPreference = "Stop"
 Set-Location -Path $PSScriptRoot
 
-Write-Host "=== ArchiQS :: PyInstaller build ===" -ForegroundColor Cyan
+Write-Host "=== QSForge :: PyInstaller build ===" -ForegroundColor Cyan
 Write-Host ""
 
 # 1. Make sure dependencies are present -------------------------------------
@@ -67,7 +67,7 @@ foreach ($dir in @("build", "dist")) {
 }
 
 # 3. Optional: flip console flag temporarily ---------------------------------
-$specFile = "archiqs.spec"
+$specFile = "qsforge.spec"
 $specBackup = $null
 if ($Console) {
     Write-Host "Console mode: enabling stdout/stderr window." -ForegroundColor Yellow
@@ -89,12 +89,12 @@ finally {
 }
 
 # 5. Verify PyInstaller output ----------------------------------------------
-$exePath = Join-Path $PSScriptRoot "dist\ArchiQS\ArchiQS.exe"
+$exePath = Join-Path $PSScriptRoot "dist\QSForge\QSForge.exe"
 if (-not (Test-Path $exePath)) {
-    throw "Build claimed success but ArchiQS.exe is missing: $exePath"
+    throw "Build claimed success but QSForge.exe is missing: $exePath"
 }
 
-$folderSize = (Get-ChildItem "dist\ArchiQS" -Recurse -File |
+$folderSize = (Get-ChildItem "dist\QSForge" -Recurse -File |
                Measure-Object -Property Length -Sum).Sum / 1MB
 
 Write-Host ""
@@ -107,14 +107,14 @@ Write-Host ("Folder size: {0:N1} MB" -f $folderSize)
 # PDFs alongside the .exe. tools/md_to_pdf.py handles the conversion and
 # embeds Microsoft YaHei for CJK support.
 $docPairs = @(
-    @{ Src = "docs\QUICK_START_CN.md"; Pdf = "ArchiQS 使用说明.pdf";    Title = "ArchiQS 使用说明" },
-    @{ Src = "docs\README.md";         Pdf = "ArchiQS User Manual.pdf"; Title = "ArchiQS User Manual" }
+    @{ Src = "docs\QUICK_START_CN.md"; Pdf = "QSForge 使用说明.pdf";    Title = "QSForge 使用说明" },
+    @{ Src = "docs\README.md";         Pdf = "QSForge User Manual.pdf"; Title = "QSForge User Manual" }
 )
 Write-Host ""
 Write-Host "=== Rendering user manuals to PDF ===" -ForegroundColor Cyan
 foreach ($pair in $docPairs) {
     $src = Join-Path $PSScriptRoot $pair.Src
-    $dst = Join-Path $PSScriptRoot ("dist\ArchiQS\" + $pair.Pdf)
+    $dst = Join-Path $PSScriptRoot ("dist\QSForge\" + $pair.Pdf)
     if (-not (Test-Path $src)) {
         Write-Host ("  WARN    source doc missing: {0}" -f $pair.Src) -ForegroundColor Yellow
         continue
@@ -132,7 +132,7 @@ foreach ($pair in $docPairs) {
 # it's a standalone Windows tool, completely independent of Python. Simpler
 # and much faster to just robocopy the folder as a post-build step.
 if (-not $NoDdc) {
-    $ddcDest = Join-Path $PSScriptRoot "dist\ArchiQS\vendor\ddc"
+    $ddcDest = Join-Path $PSScriptRoot "dist\QSForge\vendor\ddc"
 
     if (-not $DdcSource -or -not (Test-Path $DdcSource)) {
         Write-Host ""
@@ -184,7 +184,7 @@ if (-not $NoDdc) {
                 }
             }
             if ($DdcVersion) {
-                $marker = Join-Path $ddcDest ".archiqs-ddc-version"
+                $marker = Join-Path $ddcDest ".qsforge-ddc-version"
                 # Use UTF8 NoBOM — matches what updater.py writes after an
                 # in-app upgrade so the file format stays consistent across
                 # both code paths.
@@ -194,7 +194,7 @@ if (-not $NoDdc) {
                 Write-Host "  WARN: could not determine DDC version — marker not written." -ForegroundColor Yellow
             }
 
-            $folderSize = (Get-ChildItem "dist\ArchiQS" -Recurse -File |
+            $folderSize = (Get-ChildItem "dist\QSForge" -Recurse -File |
                            Measure-Object -Property Length -Sum).Sum / 1MB
             Write-Host ("  Bundle total now: {0:N1} MB" -f $folderSize) -ForegroundColor Green
         }
@@ -202,7 +202,7 @@ if (-not $NoDdc) {
 } else {
     Write-Host ""
     Write-Host "-NoDdc flag set: skipping DDC bundling." -ForegroundColor DarkGray
-    Write-Host "  End users will need DDC installed or ARCHIQS_DDC_EXE set."
+    Write-Host "  End users will need DDC installed or QSFORGE_DDC_EXE set."
 }
 
 # 7b. Copy the DDC ad-block utility alongside the .exe ---------------------
@@ -212,7 +212,7 @@ if (-not $NoDdc) {
 # "already-open browser" case where DDC opens the promo as a new TAB
 # (no new top-level window to close).
 $adBlockerSrc = Join-Path $PSScriptRoot "tools\block_ddc_ads.bat"
-$adBlockerDst = Join-Path $PSScriptRoot "dist\ArchiQS\block_ddc_ads.bat"
+$adBlockerDst = Join-Path $PSScriptRoot "dist\QSForge\block_ddc_ads.bat"
 if (Test-Path $adBlockerSrc) {
     Copy-Item -Force $adBlockerSrc $adBlockerDst
     Write-Host ""
@@ -240,30 +240,30 @@ if ($iscc) {
     # Pull the canonical version straight out of _version.py so the
     # installer, the running app, and the update manifest can never
     # disagree by more than the time between two file edits.
-    $resolvedAppVer = & python -c "import sys; sys.path.insert(0,'src'); import _version; print(_version.ARCHIQS_VERSION)"
+    $resolvedAppVer = & python -c "import sys; sys.path.insert(0,'src'); import _version; print(_version.QSFORGE_VERSION)"
     if ($LASTEXITCODE -ne 0 -or -not $resolvedAppVer) {
-        throw "Could not read ARCHIQS_VERSION from _version.py"
+        throw "Could not read QSFORGE_VERSION from _version.py"
     }
     $resolvedAppVer = $resolvedAppVer.Trim()
 
-    # Emit a tiny generated header for archiqs.iss to include. Keeping
+    # Emit a tiny generated header for qsforge.iss to include. Keeping
     # this as a separate file (rather than passing /D on the command
     # line) makes it visible in source control diffs at release time.
     $genIss = Join-Path $PSScriptRoot "installer\version.iss"
     $genBody = @"
 ; AUTO-GENERATED by build.ps1 from _version.py — do not edit by hand.
-#define ArchiQSVersion "$resolvedAppVer"
+#define QSForgeVersion "$resolvedAppVer"
 "@
     # Inno Setup's #include reads the file via its own preprocessor. UTF-8 *with*
     # BOM is what Inno Setup 6 expects for non-ASCII content; without the BOM it
     # falls back to the system code page on some systems.
     [System.IO.File]::WriteAllText($genIss, $genBody, [System.Text.UTF8Encoding]::new($true))
-    Write-Host ("  Wrote installer\version.iss (ArchiQSVersion={0})" -f $resolvedAppVer) -ForegroundColor DarkGray
+    Write-Host ("  Wrote installer\version.iss (QSForgeVersion={0})" -f $resolvedAppVer) -ForegroundColor DarkGray
 
-    & $iscc "installer\archiqs.iss"
+    & $iscc "installer\qsforge.iss"
     if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed ($LASTEXITCODE)" }
 
-    $setup = Get-ChildItem "installer\output\ArchiQS-Setup-*.exe" |
+    $setup = Get-ChildItem "installer\output\QSForge-Setup-*.exe" |
              Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if ($setup) {
         Write-Host ""
@@ -280,8 +280,8 @@ if ($iscc) {
 
 Write-Host ""
 Write-Host "Distribution options:" -ForegroundColor Yellow
-Write-Host "  * Portable  -> zip the ENTIRE 'dist\ArchiQS' folder"
-Write-Host "  * Installer -> ship 'installer\output\ArchiQS-Setup-*.exe' (requires Inno Setup)"
+Write-Host "  * Portable  -> zip the ENTIRE 'dist\QSForge' folder"
+Write-Host "  * Installer -> ship 'installer\output\QSForge-Setup-*.exe' (requires Inno Setup)"
 Write-Host ""
 if ($NoDdc) {
     Write-Host "DDC was NOT bundled (-NoDdc). Recipients need DDC installed separately." -ForegroundColor Yellow
@@ -291,6 +291,6 @@ if ($NoDdc) {
 Write-Host ""
 
 if ($Run) {
-    Write-Host "Launching ArchiQS.exe..." -ForegroundColor Cyan
+    Write-Host "Launching QSForge.exe..." -ForegroundColor Cyan
     Start-Process $exePath
 }
