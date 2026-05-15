@@ -11,6 +11,7 @@ Usage (standalone test):
     python ddc_runner.py "C:\\path\\to\\model.rvt"
 """
 
+import logging
 import os
 import sys
 import time
@@ -18,6 +19,8 @@ import shutil
 import threading
 import subprocess
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def _kill_process_tree(proc) -> None:
@@ -508,13 +511,13 @@ def _write_debug_dump(proc, cmd, rvt, exe, log=None) -> list[str]:
 
     if written:
         msg = "[QSForge] DDC debug dump written to:\n  " + "\n  ".join(written)
-        print(msg, file=sys.stderr)
+        logger.info(msg)
     else:
         msg = (
             "[QSForge] WARN: could not write qsforge_rvtexporter_last.txt anywhere. "
             f"Tried {len(candidates)} locations (cwd, user profile, project, model folder, Desktop, …)."
         )
-        print(msg, file=sys.stderr)
+        logger.warning(msg)
         log("Could not save DDC log to disk — see the terminal that started QSForge for details.")
     return written
 
@@ -1049,7 +1052,7 @@ def run_ddc(
     except Exception as e:
         import traceback
         log(f"Internal error while saving DDC log: {e}")
-        print(traceback.format_exc(), file=sys.stderr)
+        logger.error(traceback.format_exc())
 
     # Reap side products even in the no-xlsx failure path: DDC may have
     # written a half-complete .dae before crashing. Also clear the mode
@@ -1073,7 +1076,7 @@ def run_ddc(
         )
         if dump_paths:
             msg += "\nDump files:\n" + "\n".join(dump_paths)
-        print(traceback.format_exc(), file=sys.stderr)
+        logger.error(traceback.format_exc())
     raise DDCExportFailed(msg)
 
 
@@ -1168,7 +1171,7 @@ def cleanup_excel(xlsx_path):
         p.unlink()
         return True
     except OSError as e:
-        print(f"[ddc_runner] WARN: could not delete {p}: {e}", file=sys.stderr)
+        logger.warning(f"[ddc_runner] WARN: could not delete {p}: {e}")
         return False
 
 
@@ -1182,22 +1185,22 @@ if __name__ == "__main__":
                 pass
 
     if len(sys.argv) < 2:
-        print("Usage: python ddc_runner.py <path_to_rvt>")
+        logger.error("Usage: python ddc_runner.py <path_to_rvt>")
         sys.exit(2)
 
     rvt_arg = sys.argv[1]
 
     def _print(msg):
-        print(f"  · {msg}")
+        logger.info(f"  · {msg}")
 
-    print("\n" + "═" * 70)
-    print("  QSForge  |  DDC RUNNER  (standalone test)")
-    print("═" * 70)
+    logger.info("\n" + "═" * 70)
+    logger.info("  QSForge  |  DDC RUNNER  (standalone test)")
+    logger.info("═" * 70)
 
     try:
         xlsx = run_ddc(rvt_arg, on_progress=_print)
     except DDCError as e:
-        print(f"\n  ❌ {type(e).__name__}: {e}")
+        logger.error(f"\n  ❌ {type(e).__name__}: {e}")
         sys.exit(1)
 
-    print(f"\n  ✅ Excel generated:\n     {xlsx}\n")
+    logger.info(f"\n  ✅ Excel generated:\n     {xlsx}\n")
