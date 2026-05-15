@@ -1,0 +1,23 @@
+{
+  "_comment": "QSForge update manifest. Host this file at the URL configured in _version.py (DEFAULT_MANIFEST_URL) or in the QSFORGE_UPDATE_MANIFEST_URL env var. The QSForge desktop app fetches it on startup and from the in-app 'Updates' panel.",
+
+  "qsforge": {
+    "version": "1.0.0",
+    "released_at": "2026-05-15",
+    "installer_url": "https://github.com/liyq0610123-star/qsforge/releases/download/v1.0.0/QSForge-Setup-1.0.0.exe",
+    "sha256": "REPLACE_WITH_SHA256_OF_THE_INSTALLER_EXE",
+    "size_bytes": 0,
+    "release_notes_url": "https://github.com/liyq0610123-star/qsforge/releases/tag/v1.0.0",
+    "release_notes": "First public release of QSForge."
+  },
+
+  "ddc": {
+    "version": "18.1.0",
+    "released_at": "2026-05-15",
+    "package_url": "https://github.com/liyq0610123-star/qsforge/releases/download/ddc-18.1.0/DDC-18.1.0.zip",
+    "sha256": "REPLACE_WITH_SHA256_OF_THE_DDC_ZIP",
+    "size_bytes": 0,
+    "release_notes_url": "https://datadrivenconstruction.io/changelog",
+    "release_notes": "Bundled DDC version."
+  }
+}
