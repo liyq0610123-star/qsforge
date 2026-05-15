@@ -19,12 +19,15 @@ Output:
 Run: python module2_bq_draft.py <path_to_module0_excel>
 """
 
+import logging
 import pandas as pd
 import numpy as np
 import re
 import sys
 import os
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────
 # CONFIG
@@ -132,22 +135,22 @@ def add_material_class(df):
 # ─────────────────────────────────────────────
 
 def load_module0(filepath):
-    print(f"\n{'='*60}")
-    print(f"Loading: {os.path.basename(filepath)}")
+    logger.info(f"\n{'='*60}")
+    logger.info(f"Loading: {os.path.basename(filepath)}")
     df = pd.read_excel(filepath, sheet_name="QS Element List")
-    print(f"Rows loaded: {len(df):,}")
+    logger.info(f"Rows loaded: {len(df):,}")
 
     if COL_DQ in df.columns:
         df = df[df[COL_DQ] == "Clean"].copy()
-        print(f"Clean elements for BQ: {len(df):,}")
+        logger.info(f"Clean elements for BQ: {len(df):,}")
 
     df[COL_VOLUME] = pd.to_numeric(df[COL_VOLUME], errors="coerce").fillna(0)
     df[COL_AREA]   = pd.to_numeric(df[COL_AREA],   errors="coerce").fillna(0)
     df = add_material_class(df)
 
     # Print material classification summary
-    print(f"\n  Material classification:")
-    print(df["_mat_class"].value_counts().to_string())
+    logger.info(f"\n  Material classification:")
+    logger.info(df["_mat_class"].value_counts().to_string())
 
     return df
 
@@ -523,19 +526,19 @@ def export(df, input_path):
     with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
         bq_all = build_bq(df, level=None)
         bq_all.to_excel(writer, sheet_name="BQ – All Levels", index=False)
-        print(f"  BQ – All Levels: {len(bq_all)} rows")
+        logger.info(f"  BQ – All Levels: {len(bq_all)} rows")
 
         for level in levels:
             bq_lvl = build_bq(df, level=level)
             sname  = f"BQ – {level}"[:31]
             bq_lvl.to_excel(writer, sheet_name=sname, index=False)
-            print(f"  {sname}: {len(bq_lvl)} rows")
+            logger.info(f"  {sname}: {len(bq_lvl)} rows")
 
-    print(f"\n{'='*60}")
-    print(f"BQ Draft saved: {out_path}")
-    print(f"  Standard: NRM2  |  Levels: {levels}")
-    print(f"  Rate/Amount columns left blank for QS to complete")
-    print(f"{'='*60}\n")
+    logger.info(f"\n{'='*60}")
+    logger.info(f"BQ Draft saved: {out_path}")
+    logger.info(f"  Standard: NRM2  |  Levels: {levels}")
+    logger.info(f"  Rate/Amount columns left blank for QS to complete")
+    logger.info(f"{'='*60}\n")
     return out_path
 
 
@@ -545,11 +548,11 @@ def export(df, input_path):
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python module2_bq_draft.py <path_to_module0_excel>")
+        logger.error("Usage: python module2_bq_draft.py <path_to_module0_excel>")
         sys.exit(1)
     filepath = sys.argv[1]
     if not os.path.exists(filepath):
-        print(f"File not found: {filepath}")
+        logger.error(f"File not found: {filepath}")
         sys.exit(1)
     df = load_module0(filepath)
     export(df, filepath)
