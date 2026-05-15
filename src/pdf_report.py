@@ -18,6 +18,7 @@ Public API:
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -36,6 +37,8 @@ from reportlab.platypus import (
 from reportlab.platypus.flowables import Flowable
 
 import paths as app_paths
+
+logger = logging.getLogger(__name__)
 
 
 # ── Font discovery ──────────────────────────────────────────────────────────
@@ -752,7 +755,7 @@ if __name__ == "__main__":
     import json
 
     if len(sys.argv) < 3:
-        print("Usage: python pdf_report.py <last_result.json> <output.pdf>")
+        logger.error("Usage: python pdf_report.py <last_result.json> <output.pdf>")
         sys.exit(2)
 
     src = Path(sys.argv[1])
@@ -763,4 +766,4 @@ if __name__ == "__main__":
         dst,
         source_name=(data.get("file") or {}).get("path") or src.name,
     )
-    print(f"PDF written: {out}")
+    logger.info(f"PDF written: {out}")
