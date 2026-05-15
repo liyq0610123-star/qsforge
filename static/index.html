@@ -3800,7 +3800,7 @@ async function refreshUpdateModal() {
     body.innerHTML = `
       <div class="muted">Could not contact the update server. The app will keep working normally.</div>
       <div class="upd-meta">Check your internet connection, or set the
-        <code>ARCHIQS_UPDATE_MANIFEST_URL</code> environment variable to
+        <code>QSFORGE_UPDATE_MANIFEST_URL</code> environment variable to
         point at your own update server.</div>`;
     return;
   }
@@ -3809,7 +3809,7 @@ async function refreshUpdateModal() {
     body.innerHTML = `
       <div class="muted">Update checks are disabled on this machine.</div>
       <div class="upd-meta">The environment variable
-        <code>ARCHIQS_UPDATE_MANIFEST_URL</code> is set to an empty
+        <code>QSFORGE_UPDATE_MANIFEST_URL</code> is set to an empty
         string. To re-enable updates, unset it and restart QSForge.</div>`;
     return;
   }
