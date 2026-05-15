@@ -207,6 +207,21 @@ def _run_job(job, keep_xlsx=True):
                 cached = None
             if cached is not None:
                 job.emit("✨ Full result cache hit — skipping entire pipeline.")
+                # Refresh module3 on cache-hit so the .glb is guaranteed on
+                # disk (and at the path recorded in module3.glb_path). The
+                # cached JSON's glb_path could point at a working-dir file
+                # the user has since deleted; re-running module3 against the
+                # cached .dae regenerates the GLB cheaply (~1 s via trimesh).
+                # If we can't find the DAE we keep the cached module3 as-is
+                # and let the 3D endpoint 404 — better than failing the
+                # whole cache-hit just because the preview is unavailable.
+                try:
+                    cached_m3 = cached.get("module3") or {}
+                    cached_dae = cached_m3.get("dae_path")
+                    if cached_dae and Path(cached_dae).is_file():
+                        cached["module3"] = module3_3d_preview.run(cached_dae)
+                except Exception as e:
+                    job.emit(f"(M3 refresh on cache-hit failed: {e})")
                 # Audit dump still happens so /api/last_result works.
                 try:
                     dump_path = BASE_DIR / "last_result.json"
@@ -283,6 +298,23 @@ def _run_job(job, keep_xlsx=True):
             job.emit(f"Result dumped → {dump_path.name}")
         except Exception as e:
             job.emit(f"(Could not write last_result.json: {e})")
+
+        # Backfill GLB into the xlsx/dae cache trio. ddc_runner.run_ddc
+        # stored xlsx+dae before module3 ran, so the GLB was not yet on disk.
+        # Now that module3 has converted DAE→GLB we re-call cache.store with
+        # the same xlsx+dae plus the fresh glb_path so the trio is complete.
+        # Best-effort: a cache backfill failure must NEVER fail an otherwise
+        # successful analysis.
+        try:
+            import cache as _cache
+            m3 = data.get("module3") or {}
+            glb_p = m3.get("glb_path") or None
+            dae_str = m3.get("dae_path") or None
+            if xlsx_path and dae_str and Path(dae_str).is_file():
+                _cache.store(job.rvt_path, job.mode, xlsx_path,
+                             dae_str, glb_path=glb_p)
+        except Exception as e:
+            job.emit(f"(GLB cache backfill failed: {e})")
 
         # Full-result cache: store the analysis result alongside the cached
         # xlsx/dae so the next analysis of this same .rvt skips the pipeline.
@@ -521,18 +553,20 @@ def last_result():
 
 
 @app.get("/api/3d/<job_id>")
-def stream_dae(job_id: str):
-    """Stream the .dae bytes for a finished job to the browser.
+def stream_3d(job_id: str):
+    """Stream the .glb bytes for a finished job to the browser.
+
+    Why GLB (not DAE) since 1.0.1: three.js's ColladaLoader proved unreliable
+    on real-world architectural Revit exports. We now convert DAE→GLB at
+    analysis time (see module3_3d_preview._convert_dae_to_glb) and serve the
+    GLB to GLTFLoader.
 
     Why a streaming endpoint and not a base64-blob in the JSON: a typical
-    architectural .dae is 30–200 MB. Stuffing that into last_result.json
+    architectural .glb is 15–80 MB. Stuffing that into last_result.json
     would balloon JSON parsing time on the frontend AND blow our SSE event
     pipeline. HTTP streaming with the right Content-Type is the right
     channel for binary geometry.
     """
-    # Hold the lock for the whole lookup so we don't race against analyze().
-    # The "current" branch lets the frontend ask for the most recent done
-    # job when it has lost track (e.g. user reloaded the page).
     with _jobs_lock:
         job = _jobs.get(job_id)
         if job is None and job_id == "current":
@@ -542,10 +576,10 @@ def stream_dae(job_id: str):
     if job is None or job.state != "done" or not job.result:
         abort(404, description="Job not found or not finished")
     m3 = (job.result or {}).get("module3") or {}
-    dae_path = m3.get("dae_path")
-    if not dae_path:
-        abort(404, description="No DAE for this job")
-    return send_file(dae_path, mimetype="model/vnd.collada+xml",
+    glb_path = m3.get("glb_path")
+    if not glb_path:
+        abort(404, description="No 3D preview available for this job")
+    return send_file(glb_path, mimetype="model/gltf-binary",
                      as_attachment=False, conditional=True)
 
 
