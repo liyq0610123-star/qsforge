@@ -27,7 +27,7 @@ def _write_cache_files(rvt: Path, mode: str, ddc_version: str = "18.1.0",
     dae.write_bytes(b"fake dae")
     stat = rvt.stat()
     meta.write_text(json.dumps({
-        "schema_version": 1,
+        "schema_version": 2,
         "rvt_path": str(rvt),
         "rvt_size": stat.st_size,
         "rvt_mtime": stat.st_mtime,
@@ -37,6 +37,7 @@ def _write_cache_files(rvt: Path, mode: str, ddc_version: str = "18.1.0",
         "created_at": "2026-05-08T10:23:14Z",
         "xlsx_path": str(xlsx),
         "dae_path": str(dae),
+        "glb_path": "",
     }))
     return xlsx, dae, meta
 
@@ -67,6 +68,7 @@ def test_lookup_returns_hit_when_cache_is_fresh(tmp_rvt):
     assert hit.ddc_mode == "standard"
     assert hit.xlsx_path.name.endswith("_standard.xlsx")
     assert hit.dae_path.name.endswith("_standard.dae")
+    assert hit.glb_path is None
 
 
 def test_lookup_invalidates_when_rvt_size_changed(tmp_rvt):
@@ -89,7 +91,9 @@ def test_lookup_tolerates_mtime_drift_within_tolerance(tmp_rvt):
     _write_cache_files(tmp_rvt, "standard")
     new_t = tmp_rvt.stat().st_mtime + 1.0  # < 2 s tolerance
     os.utime(tmp_rvt, (new_t, new_t))
-    assert cache.lookup(str(tmp_rvt), "standard") is not None
+    hit = cache.lookup(str(tmp_rvt), "standard")
+    assert hit is not None
+    assert hit.glb_path is None
 
 
 def test_lookup_invalidates_when_mode_differs(tmp_rvt):
@@ -146,10 +150,11 @@ def test_store_writes_xlsx_dae_and_meta_to_cache_dir(tmp_path, monkeypatch):
     assert (cache_dir / "m_standard.xlsx").read_bytes() == b"xlsx-bytes"
     assert (cache_dir / "m_standard.dae").read_bytes() == b"dae-bytes"
     meta = json.loads((cache_dir / "m_standard.cache.json").read_text())
-    assert meta["schema_version"] == 1
+    assert meta["schema_version"] == 2
     assert meta["ddc_mode"] == "standard"
     assert meta["ddc_version"] == "18.1.0"
     assert meta["rvt_size"] == 100
+    assert meta["glb_path"] == ""
 
 
 def test_store_then_lookup_round_trip(tmp_path, monkeypatch):
@@ -165,6 +170,7 @@ def test_store_then_lookup_round_trip(tmp_path, monkeypatch):
     hit = cache.lookup(str(rvt), "standard")
     assert hit is not None
     assert hit.ddc_mode == "standard"
+    assert hit.glb_path is None
 
 
 def test_invalidate_removes_cache_files(tmp_rvt, monkeypatch):
@@ -251,5 +257,46 @@ def test_store_xlsx_only_round_trip_has_no_dae(tmp_path, monkeypatch):
     hit = cache.lookup(str(rvt), "standard")
     assert hit is not None
     assert hit.dae_path is None
+    assert hit.glb_path is None
     # Caller-side dae-aware logic: a dae=True request would treat this as a miss
     assert hit.dae_path is None or not hit.dae_path.is_file()
+
+
+def test_store_and_lookup_with_glb(tmp_rvt, tmp_path, monkeypatch):
+    """A store call that includes glb_path must round-trip through lookup."""
+    import cache
+    monkeypatch.setattr(cache, "_current_ddc_version", lambda: "test-1.0")
+
+    xlsx = tmp_path / "out.xlsx"
+    xlsx.write_bytes(b"FAKE_XLSX")
+    dae = tmp_path / "out.dae"
+    dae.write_bytes(b"FAKE_DAE")
+    glb = tmp_path / "out.glb"
+    glb.write_bytes(b"glTF" + b"FAKE_GLB_PAYLOAD")
+
+    cache.store(str(tmp_rvt), "default", str(xlsx), str(dae), str(glb))
+    hit = cache.lookup(str(tmp_rvt), "default")
+    assert hit is not None
+    assert hit.glb_path is not None
+    assert hit.glb_path.is_file()
+    assert hit.glb_path.read_bytes()[:4] == b"glTF"
+
+
+def test_v1_cache_is_invalidated(tmp_rvt, tmp_path, monkeypatch):
+    """A v1 cache JSON must be ignored by v2 lookup."""
+    import cache, json
+    monkeypatch.setattr(cache, "_current_ddc_version", lambda: "test-1.0")
+    cache_dir = tmp_rvt.parent / ".qsforge-cache"
+    cache_dir.mkdir()
+    (cache_dir / "model_default.cache.json").write_text(json.dumps({
+        "schema_version": 1,  # OLD version
+        "rvt_path": str(tmp_rvt),
+        "rvt_size": tmp_rvt.stat().st_size,
+        "rvt_mtime": tmp_rvt.stat().st_mtime,
+        "ddc_mode": "default",
+        "ddc_version": "test-1.0",
+        "qsforge_version": "1.0.0",
+        "xlsx_path": "",
+        "dae_path": "",
+    }))
+    assert cache.lookup(str(tmp_rvt), "default") is None

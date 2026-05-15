@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Optional
 
 # Bumped whenever the JSON shape changes. Old caches are silently invalidated.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Filesystem mtimes can round up to 2 s on some Windows filesystems.
 MTIME_TOLERANCE_SEC = 2.0
@@ -40,6 +40,7 @@ MTIME_TOLERANCE_SEC = 2.0
 class CacheHit:
     xlsx_path: Path
     dae_path: Optional[Path]
+    glb_path: Optional[Path]
     ddc_mode: str
     ddc_version: str
     qsforge_version: str
@@ -125,9 +126,15 @@ def lookup(rvt_path: str, ddc_mode: str) -> Optional[CacheHit]:
     if dae_path is not None and not dae_path.is_file():
         return None
 
+    glb_str = data.get("glb_path", "")
+    glb_path = Path(glb_str) if glb_str else None
+    if glb_path is not None and not glb_path.is_file():
+        return None
+
     return CacheHit(
         xlsx_path=xlsx,
         dae_path=dae_path,
+        glb_path=glb_path,
         ddc_mode=data.get("ddc_mode", ddc_mode),
         ddc_version=data.get("ddc_version", ""),
         qsforge_version=data.get("qsforge_version", ""),
@@ -136,11 +143,14 @@ def lookup(rvt_path: str, ddc_mode: str) -> Optional[CacheHit]:
 
 
 def store(rvt_path: str, ddc_mode: str,
-          xlsx_path: str, dae_path: str) -> None:
-    """Copy fresh xlsx + dae into the cache dir and write metadata.
+          xlsx_path: str, dae_path: str,
+          glb_path: str | None = None) -> None:
+    """Copy fresh xlsx + dae (+ optional glb) into the cache dir and write metadata.
 
-    Both source files MUST exist on disk. Copies are used (not moves) so
-    the caller can keep its own working files.
+    The xlsx and dae source files MUST exist on disk. The glb source, if
+    provided, is copied best-effort: a missing glb does not raise (it just
+    isn't recorded). Copies are used (not moves) so the caller can keep its
+    own working files.
     """
     rvt = Path(rvt_path).resolve()
     src_xlsx = Path(xlsx_path)
@@ -167,6 +177,13 @@ def store(rvt_path: str, ddc_mode: str,
     try:
         shutil.copy2(src_xlsx, dst_xlsx)
         shutil.copy2(src_dae, dst_dae)
+        dst_glb_str = ""
+        if glb_path:
+            src_glb = Path(glb_path)
+            if src_glb.is_file():
+                dst_glb = cache_dir / f"{base}_{ddc_mode}.glb"
+                shutil.copy2(src_glb, dst_glb)
+                dst_glb_str = str(dst_glb)
         rvt_stat = rvt.stat()
         meta_p.write_text(json.dumps({
             "schema_version": SCHEMA_VERSION,
@@ -179,6 +196,7 @@ def store(rvt_path: str, ddc_mode: str,
             "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "xlsx_path": str(dst_xlsx),
             "dae_path": str(dst_dae),
+            "glb_path": dst_glb_str,
         }, indent=2), encoding="utf-8")
     except Exception:
         invalidate(rvt_path, ddc_mode)
@@ -218,6 +236,7 @@ def store_xlsx_only(rvt_path: str, ddc_mode: str, xlsx_path: str) -> None:
             "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "xlsx_path": str(dst_xlsx),
             "dae_path": "",  # absent — lookup returns CacheHit with dae_path=None
+            "glb_path": "",
         }, indent=2), encoding="utf-8")
     except Exception:
         invalidate(rvt_path, ddc_mode)
@@ -279,7 +298,7 @@ def invalidate(rvt_path: str, ddc_mode: str) -> None:
     """Remove the cache files for one (.rvt, mode) pair. Safe if absent."""
     base = Path(rvt_path).stem
     cache_dir = _cache_dir(rvt_path)
-    for suffix in (".xlsx", ".dae", ".cache.json", ".result.json"):
+    for suffix in (".xlsx", ".dae", ".glb", ".cache.json", ".result.json"):
         p = cache_dir / f"{base}_{ddc_mode}{suffix}"
         try:
             p.unlink()
