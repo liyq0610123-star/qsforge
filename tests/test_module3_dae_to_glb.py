@@ -49,3 +49,18 @@ def test_convert_preserves_element_id_node_names(fixtures_dir, tmp_path):
         f"None of the expected element IDs {expected_ids} survived. "
         f"GLB names: {sorted(names)}"
     )
+
+
+def test_convert_raises_module3_conversion_error_on_garbage(tmp_path):
+    """A non-XML file must raise Module3ConversionError, not a generic Exception."""
+    dae = tmp_path / "garbage.dae"
+    dae.write_bytes(b"this is not COLLADA at all")
+    with pytest.raises(m3.Module3ConversionError):
+        m3._convert_dae_to_glb(dae)
+
+
+def test_convert_raises_on_missing_file(tmp_path):
+    """A missing input file must raise Module3ConversionError."""
+    dae = tmp_path / "does_not_exist.dae"
+    with pytest.raises(m3.Module3ConversionError):
+        m3._convert_dae_to_glb(dae)
