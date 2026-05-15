@@ -44,6 +44,7 @@ def _empty_result(warning: str) -> Dict[str, Any]:
     """Helper: result dict for the "3D not available" path."""
     return {
         "dae_path": None,
+        "glb_path": None,
         "element_count": 0,
         "has_element_ids": False,
         "file_size_bytes": 0,
@@ -102,6 +103,7 @@ def run(dae_path: str) -> Dict[str, Any]:
         if element_count == 0:
             return {
                 "dae_path": str(p.resolve()),
+                "glb_path": None,
                 "element_count": 0,
                 "has_element_ids": False,
                 "file_size_bytes": file_size_bytes,
@@ -139,8 +141,28 @@ def run(dae_path: str) -> Dict[str, Any]:
                     "click-inspection and problem-highlighting will be disabled."
                 )
 
+        # All validation passed — now convert to GLB so the viewer has a
+        # GLTFLoader-friendly file. We do this last so that any conversion
+        # failure surfaces as a warning but does NOT discard the validation
+        # we just did against the DAE.
+        glb_path_str: str | None = None
+        try:
+            glb_path = _convert_dae_to_glb(p)
+            glb_path_str = str(glb_path.resolve())
+        except Module3ConversionError as e:
+            warnings.append(f"3D preview unavailable: {e}")
+            return {
+                "dae_path": str(p.resolve()),
+                "glb_path": None,
+                "element_count": element_count,
+                "has_element_ids": has_element_ids,
+                "file_size_bytes": file_size_bytes,
+                "warnings": warnings,
+            }
+
         return {
             "dae_path": str(p.resolve()),
+            "glb_path": glb_path_str,
             "element_count": element_count,
             "has_element_ids": has_element_ids,
             "file_size_bytes": file_size_bytes,

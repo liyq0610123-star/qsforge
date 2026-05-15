@@ -12,6 +12,7 @@ def test_run_returns_dict_with_expected_keys(fixtures_dir):
     result = m3.run(str(fixtures_dir / "tiny.dae"))
     assert isinstance(result, dict)
     assert "dae_path" in result
+    assert "glb_path" in result
     assert "element_count" in result
     assert "has_element_ids" in result
     assert "warnings" in result
@@ -37,6 +38,7 @@ def test_run_returns_dae_path_resolved_absolute(fixtures_dir):
 def test_run_handles_missing_file_gracefully():
     result = m3.run("C:/does/not/exist.dae")
     assert result["dae_path"] is None
+    assert result["glb_path"] is None
     assert result["element_count"] == 0
     assert result["has_element_ids"] is False
     assert any("not found" in w.lower() for w in result["warnings"])
@@ -45,6 +47,7 @@ def test_run_handles_missing_file_gracefully():
 def test_run_handles_malformed_dae_gracefully(fixtures_dir):
     result = m3.run(str(fixtures_dir / "malformed.dae"))
     assert result["dae_path"] is None
+    assert result["glb_path"] is None
     assert result["element_count"] == 0
     assert result["has_element_ids"] is False
     assert any("parse" in w.lower() or "invalid" in w.lower()
@@ -90,3 +93,14 @@ def test_run_never_raises_on_invalid_input_types():
         assert isinstance(result, dict)
         assert result["dae_path"] is None
         assert result["has_element_ids"] is False
+
+
+def test_run_produces_glb_for_valid_dae(fixtures_dir, tmp_path):
+    """End-to-end: run() should validate AND convert."""
+    src = fixtures_dir / "tiny_with_geom.dae"
+    dae = tmp_path / "tiny_with_geom.dae"
+    dae.write_bytes(src.read_bytes())
+    result = m3.run(str(dae))
+    assert result["glb_path"] is not None
+    assert Path(result["glb_path"]).is_file()
+    assert Path(result["glb_path"]).read_bytes()[:4] == b"glTF"
