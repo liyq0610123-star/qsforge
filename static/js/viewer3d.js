@@ -369,12 +369,16 @@ export class Viewer3D {
   }
 
   async load(glbUrl, resultData) {
+    console.log('[Viewer3D] load() called, url:', glbUrl);
     const loader = new GLTFLoader();
+    console.log('[Viewer3D] GLTFLoader instance OK, typeof:', typeof loader, 'load fn:', typeof loader.load);
     return new Promise((resolve, reject) => {
       loader.load(
         glbUrl,
         (gltf) => {
+          console.log('[Viewer3D] GLTFLoader callback entered. gltf keys:', Object.keys(gltf || {}));
           try {
+            console.log('[Viewer3D] gltf.scene type:', typeof gltf.scene, 'children:', gltf.scene && gltf.scene.children && gltf.scene.children.length);
             // glTF scenes are Y-up by spec — no manual reparenting / matrix
             // baking is needed (ColladaLoader required that hack because it
             // put unit-scale and Z-up→Y-up rotation on ancestor groups, which
@@ -382,6 +386,7 @@ export class Viewer3D {
             // we can drop straight into modelGroup.
             this.modelGroup.add(gltf.scene);
             this.modelGroup.updateMatrixWorld(true);
+            console.log('[Viewer3D] scene added to modelGroup');
 
             // DIAGNOSTIC PASS: count what's actually in the scene by type,
             // sample first 3 meshes' geometry data, and force every
@@ -434,14 +439,19 @@ export class Viewer3D {
             });
             this._sceneCounts = counts;
             this._meshSamples = meshSamples;
+            console.log('[Viewer3D] diagnostic pass done. counts:', counts);
             this._buildElementMap(resultData);
+            console.log('[Viewer3D] _buildElementMap done, elementMap size:', Object.keys(this.elementMap).length);
             this._mergedMode = false;
             if (Object.keys(this.elementMap).length > 8000) {
               this._tryMergeGeometries();
             }
             this._buildSeverityMap(resultData);
+            console.log('[Viewer3D] _buildSeverityMap done, severityMap size:', Object.keys(this.severityMap).length);
             this._applyColorMode('status');
+            console.log('[Viewer3D] _applyColorMode done');
             this._frameModel();
+            console.log('[Viewer3D] _frameModel done');
             const diagnostics = this.diagnostics || {};
             diagnostics.sceneCounts = this._sceneCounts || {};
             diagnostics.meshSamples = this._meshSamples || [];
@@ -451,11 +461,19 @@ export class Viewer3D {
               diagnostics: diagnostics,
             });
           } catch (e) {
+            console.error('[Viewer3D] error inside success callback:', e, e && e.stack);
             reject(e);
           }
         },
-        undefined,
-        (err) => reject(err),
+        (progress) => {
+          if (progress && progress.lengthComputable) {
+            console.log('[Viewer3D] download progress:', Math.round(100 * progress.loaded / progress.total), '%');
+          }
+        },
+        (err) => {
+          console.error('[Viewer3D] GLTFLoader error callback:', err, err && err.stack, err && err.message);
+          reject(err);
+        },
       );
     });
   }
