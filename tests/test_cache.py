@@ -336,3 +336,24 @@ def test_update_glb_returns_none_when_source_missing(tmp_rvt, tmp_path, monkeypa
     monkeypatch.setattr(cache, "_current_ddc_version", lambda: "test-1.0")
     _write_cache_files(tmp_rvt, "standard")
     assert cache.update_glb(str(tmp_rvt), "standard", str(tmp_path / "does_not_exist.glb")) is None
+
+
+def test_load_result_accepts_caches_from_same_major_version(tmp_rvt, monkeypatch):
+    """1.0.2-created cache must remain usable under 1.0.3 (same major)."""
+    monkeypatch.setattr(cache, "_current_ddc_version", lambda: "18.1.0")
+    monkeypatch.setattr(cache, "_current_qsforge_version", lambda: "1.0.3")
+    _write_cache_files(tmp_rvt, "standard", qsforge_version="1.0.2")
+    # Seed the result.json sidecar that load_result needs.
+    result_p = tmp_rvt.parent / ".qsforge-cache" / f"{tmp_rvt.stem}_standard.result.json"
+    result_p.write_text(json.dumps({"module0": {}, "module2": {}, "module3": {}, "score": {}}))
+    assert cache.load_result(str(tmp_rvt), "standard") is not None
+
+
+def test_load_result_rejects_caches_from_different_major(tmp_rvt, monkeypatch):
+    """A 0.x cache (different major) should be invalidated under 1.x."""
+    monkeypatch.setattr(cache, "_current_ddc_version", lambda: "18.1.0")
+    monkeypatch.setattr(cache, "_current_qsforge_version", lambda: "1.0.3")
+    _write_cache_files(tmp_rvt, "standard", qsforge_version="0.9.0")
+    result_p = tmp_rvt.parent / ".qsforge-cache" / f"{tmp_rvt.stem}_standard.result.json"
+    result_p.write_text("{}")
+    assert cache.load_result(str(tmp_rvt), "standard") is None

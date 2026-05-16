@@ -317,15 +317,28 @@ def store_result(rvt_path: str, ddc_mode: str, result: dict) -> None:
 def load_result(rvt_path: str, ddc_mode: str) -> Optional[dict]:
     """Return the cached result dict if fresh, else ``None``.
 
-    Re-uses :func:`lookup` for freshness — so all the same invalidation
-    rules apply (rvt size/mtime, ddc_mode, ddc_version, schema_version).
-    Additionally requires ``qsforge_version`` to match: schema changes
-    between releases otherwise risk feeding stale dicts to new code.
+    Re-uses :func:`lookup` for cache-file freshness (rvt size/mtime,
+    ddc_mode, ddc_version, cache schema_version). No longer compares the
+    full ``qsforge_version`` — previously every patch release wiped all
+    user caches and forced full DDC re-runs even when the result-dict
+    shape was unchanged. Going forward, the result dict shape only
+    changes between *major* QSForge releases; we treat any 1.x cache as
+    compatible with any 1.y app. If a future release *does* change the
+    shape, bump the major version and the SCHEMA_VERSION constant
+    together.
     """
     hit = lookup(rvt_path, ddc_mode)
     if hit is None:
         return None
-    if hit.qsforge_version != _current_qsforge_version():
+    # Cross-major-version guard: if the cache was created by a different
+    # MAJOR version, the result shape may have shifted. Otherwise trust it.
+    try:
+        cached_major = (hit.qsforge_version or "").split(".")[0]
+        current_major = (_current_qsforge_version() or "").split(".")[0]
+        if cached_major and current_major and cached_major != current_major:
+            return None
+    except Exception:
+        # If versions don't parse, prefer to skip the cache (safe default).
         return None
     path = _result_path(rvt_path, ddc_mode)
     if not path.is_file():
