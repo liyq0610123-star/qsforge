@@ -242,36 +242,94 @@ def _convert_dae_to_glb(dae_path: Path) -> Path:
         ) from e
 
     # Re-bind Revit element IDs from the source DAE onto scene geometries.
-    # trimesh's default DAE loader auto-suffixes geometry keys (cube_geom,
-    # cube_geom_1, ...) and discards <node name="..."> values. We walk the
-    # DAE once with ElementTree, pull each visual_scene <node>'s name (or
-    # its id if name is the literal "node" placeholder DDC sometimes emits),
-    # and rename scene.geometry keys in declaration order so the resulting
-    # GLB carries the Revit element IDs.
+    #
+    # DDC's COLLADA structure is many-to-one: a single Revit element ID can
+    # reference multiple <geometry> blocks via separate <node> entries that
+    # each carry the same `name` attribute. Example for element 1473185:
+    #     <node name="1473185"><instance_geometry url="#shape5-lib"/></node>
+    #     <node name="1473185"><instance_geometry url="#shape6-lib"/></node>
+    #     ... (six shapes for that one element)
+    #
+    # trimesh's DAE loader keys scene.geometry by the underlying <geometry id>
+    # (e.g. "shape5-lib") AND names every scene.graph node the same way,
+    # losing the Revit element ID entirely. We walk the DAE's <visual_scene>
+    # once and build a shape_id → element_id map, then rebuild BOTH
+    # scene.geometry AND scene.graph so the GLB carries element IDs as both
+    # mesh names and glTF node names. (glTF node names are what GLTFLoader
+    # surfaces as Object3D.name in three.js — that's what the viewer's
+    # element map keys on.)
+    #
+    # Collisions (multiple shapes mapping to the same element) get a numeric
+    # suffix — "1473185", "1473185_1", "1473185_2" — so all geometry survives
+    # the rename. The viewer (viewer3d.js) strips the suffix when matching
+    # severity / metadata so picking and highlighting still work.
     try:
         import xml.etree.ElementTree as _ET
         _ns = {"c": "http://www.collada.org/2005/11/COLLADASchema"}
         tree = _ET.parse(str(dae_path))
-        node_names: list[str] = []
+
+        # Step 1: build shape_id → element_id from the visual_scene.
+        shape_to_element: Dict[str, str] = {}
         for n in tree.getroot().findall(".//c:visual_scene//c:node", _ns):
             name = (n.get("name") or "").strip()
-            if not name or name == "node":
-                # Fall back to id attribute (strip any "element_" prefix DDC uses).
+            if not (name and _NUMERIC_NAME.match(name)):
                 raw_id = (n.get("id") or "").strip()
                 if raw_id.startswith("element_"):
                     raw_id = raw_id[len("element_"):]
-                name = raw_id
-            if name:
-                node_names.append(name)
+                if _NUMERIC_NAME.match(raw_id):
+                    name = raw_id
+                else:
+                    continue
+            for ig in n.findall("c:instance_geometry", _ns):
+                url = (ig.get("url") or "").strip().lstrip("#")
+                if url and url not in shape_to_element:
+                    # First occurrence wins. DDC sometimes emits dangling
+                    # <instance_geometry url="#shapeN-lib"/> references where
+                    # no matching <geometry id="shapeN-lib"> exists; those
+                    # simply never match a scene.geometry key, which is fine.
+                    shape_to_element[url] = name
 
-        geom_keys = list(scene.geometry.keys())
-        for idx, key in enumerate(geom_keys):
-            if idx < len(node_names) and node_names[idx] and node_names[idx] != key:
-                # Move the geometry under its new key. Skip on collision —
-                # we'd rather keep the first occurrence than corrupt the scene.
-                new_key = node_names[idx]
-                if new_key not in scene.geometry:
-                    scene.geometry[new_key] = scene.geometry.pop(key)
+        # Step 2: pick a new key for every existing geometry, suffixing
+        # collisions so we don't drop any meshes.
+        seen_counts: Dict[str, int] = {}
+        old_to_new: Dict[str, str] = {}
+        for old_key in list(scene.geometry.keys()):
+            new_base = shape_to_element.get(old_key)
+            if not new_base:
+                old_to_new[old_key] = old_key
+                continue
+            count = seen_counts.get(new_base, 0)
+            new_key = new_base if count == 0 else f"{new_base}_{count}"
+            seen_counts[new_base] = count + 1
+            old_to_new[old_key] = new_key
+
+        # Step 3: rename in scene.geometry.
+        renamed_geom = 0
+        for old_key, new_key in old_to_new.items():
+            if new_key != old_key and old_key in scene.geometry and new_key not in scene.geometry:
+                scene.geometry[new_key] = scene.geometry.pop(old_key)
+                renamed_geom += 1
+
+        # Step 4: rebuild scene.graph so glTF node names also become the
+        # element IDs. (trimesh keys nodes by `frame_to` in its edge list,
+        # and the GLB exporter uses these names verbatim as glTF node names.)
+        edgelist = list(scene.graph.to_edgelist())
+        new_edges = []
+        for frame_from, frame_to, data in edgelist:
+            new_frame_to = old_to_new.get(frame_to, frame_to)
+            new_data = dict(data)
+            if "geometry" in new_data:
+                new_data["geometry"] = old_to_new.get(
+                    new_data["geometry"], new_data["geometry"]
+                )
+            new_edges.append([frame_from, new_frame_to, new_data])
+        scene.graph.clear()
+        scene.graph.from_edgelist(new_edges)
+
+        _log.info(
+            "Element-ID rebind: %d/%d geometries renamed (%d unique element IDs)",
+            renamed_geom, len(scene.geometry), len(seen_counts),
+        )
     except Exception as e:
         _log.warning("Could not re-bind DAE node names onto GLB: %s", e)
 

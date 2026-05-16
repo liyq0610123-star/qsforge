@@ -167,11 +167,14 @@ export class Viewer3D {
         }
         return;
       }
+      // Mesh names may be either bare element IDs ("1473185") or suffixed
+      // for multi-shape elements ("1473185_1"); accept both shapes.
+      const ID_RE = /^\d+(?:_\d+)?$/;
       let target = hits[0].object;
-      while (target && (!target.name || !/^\d+$/.test(target.name)) && target.parent) {
+      while (target && (!target.name || !ID_RE.test(target.name)) && target.parent) {
         target = target.parent;
       }
-      const id = target && /^\d+$/.test(target.name) ? target.name : null;
+      const id = target && ID_RE.test(target.name) ? target.name : null;
       this.setSelected(id, additive);
       this.onPick(this.getSelection());
     };
@@ -496,20 +499,33 @@ export class Viewer3D {
         raw: el,
       };
     }
+    // Mesh names may be a bare element ID ("1473185") OR a suffixed form
+    // ("1473185_1", "1473185_2", ...) when one Revit element contains
+    // multiple shapes — the server-side DAE→GLB converter appends a numeric
+    // suffix to keep all shapes in the GLB after renaming collisions.
+    // Strip the suffix when looking up metadata + when keying elementMap.
+    const ID_RE = /^(\d+)(?:_\d+)?$/;
     this.modelGroup.traverse((obj) => {
-      if (obj.isMesh && /^\d+$/.test(obj.name)) {
-        const m = meta[obj.name] || {
-          family: 'Non-QS', type: '', category: 'Non-QS', raw: null,
-        };
-        this.elementMap[obj.name] = {
-          mesh: obj,
-          originalMaterial: obj.material,
-          family: m.family,
-          type: m.type,
-          category: m.category,
-          raw: m.raw,
-        };
-      }
+      if (!obj.isMesh) return;
+      const m = ID_RE.exec(obj.name || '');
+      if (!m) return;
+      const baseId = m[1];
+      const md = meta[baseId] || {
+        family: 'Non-QS', type: '', category: 'Non-QS', raw: null,
+      };
+      // The mesh.name itself (with any suffix) stays as the elementMap key
+      // so each shape is independently selectable. The `baseId` is what
+      // links back to QS data and severity. Multiple entries can share the
+      // same baseId — that's intentional.
+      this.elementMap[obj.name] = {
+        mesh: obj,
+        originalMaterial: obj.material,
+        family: md.family,
+        type: md.type,
+        category: md.category,
+        raw: md.raw,
+        baseId,
+      };
     });
   }
 
@@ -565,8 +581,12 @@ export class Viewer3D {
     }
     for (const [id, entry] of Object.entries(this.elementMap)) {
       let mat;
+      // Severity is indexed by the bare Revit element ID. When mesh names
+      // carry a "_N" suffix for multi-shape elements, look up by baseId so
+      // every shape of an element shares the same severity colour.
+      const sevKey = entry.baseId || id;
       if (mode === 'status') {
-        const sev = this.severityMap[id];
+        const sev = this.severityMap[sevKey];
         if (sev && this.severityVisibility[sev]) {
           mat = new THREE.MeshStandardMaterial({
             color: SEVERITY_COLORS[sev],
