@@ -1,12 +1,12 @@
 {
   "qsforge": {
-    "version": "1.0.1",
+    "version": "1.0.2",
     "released_at": "2026-05-16",
-    "installer_url": "https://github.com/liyq0610123-star/qsforge/releases/download/v1.0.1/QSForge-Setup-1.0.1.exe",
-    "sha256": "25d3aefef84521f482b125ff23313e4cc4eeab6e2bd0aaa6998d8be8e17549a3",
-    "size_bytes": 249085210,
-    "release_notes_url": "https://github.com/liyq0610123-star/qsforge/releases/tag/v1.0.1",
-    "release_notes": "Fixes 3D preview reliability on real-world Revit models. Internal viewer pipeline migrated from COLLADA (ColladaLoader) to glTF (GLTFLoader) via a trimesh-based DAE→GLB conversion step. Element-ID rebinding handles DDC's many-to-one node/geometry structure. Z-up→Y-up rotation applied client-side. Cache schema bumped v1→v2 (auto-invalidates 1.0.0 caches; first re-analysis recreates them)."
+    "installer_url": "https://github.com/liyq0610123-star/qsforge/releases/download/v1.0.2/QSForge-Setup-1.0.2.exe",
+    "sha256": "ec05d793c24f8031f05f6fa84d87a4ee7a137914f24dd50825099253d1846f76",
+    "size_bytes": 249159715,
+    "release_notes_url": "https://github.com/liyq0610123-star/qsforge/releases/tag/v1.0.2",
+    "release_notes": "Hotfix for 1.0.1: 3D preview now actually works in the installed build. 1.0.1's frozen build was missing pycollada's schema-1.4.1.xml data file (used wrong PyInstaller package name — pycollada is the PyPI name; Python imports as 'collada'). Symptom in 1.0.1: 3D Preview tab always showed 'Could not load 3D preview, 404 Not Found' on every model. 1.0.2 bundles the schema correctly. No other behaviour changes."
   },
   "ddc": {
     "version": "18.1.0",
