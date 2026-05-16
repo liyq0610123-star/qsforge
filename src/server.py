@@ -207,19 +207,49 @@ def _run_job(job, keep_xlsx=True):
                 cached = None
             if cached is not None:
                 job.emit("✨ Full result cache hit — skipping entire pipeline.")
-                # Refresh module3 on cache-hit so the .glb is guaranteed on
-                # disk (and at the path recorded in module3.glb_path). The
-                # cached JSON's glb_path could point at a working-dir file
-                # the user has since deleted; re-running module3 against the
-                # cached .dae regenerates the GLB cheaply (~1 s via trimesh).
-                # If we can't find the DAE we keep the cached module3 as-is
-                # and let the 3D endpoint 404 — better than failing the
-                # whole cache-hit just because the preview is unavailable.
+                # Make sure module3.glb_path points to a file that exists.
+                # We try three sources in order of cost:
+                #
+                #   1. The path already in the cached result JSON (free).
+                #   2. The cache-dir's own .glb copy (free; just re-point).
+                #   3. Re-convert from the cache-dir's DAE (1-2 min) AND
+                #      promote the result back into the cache so subsequent
+                #      hits skip step 3.
+                #
+                # Earlier versions unconditionally re-ran module3 on every
+                # cache hit, paying the trimesh conversion cost (~1-2 min on
+                # real architectural DAEs) even when the GLB was already on
+                # disk. That made repeat-analysis feel as slow as first-run
+                # — the very thing the cache is supposed to fix.
                 try:
                     cached_m3 = cached.get("module3") or {}
-                    cached_dae = cached_m3.get("dae_path")
-                    if cached_dae and Path(cached_dae).is_file():
-                        cached["module3"] = module3_3d_preview.run(cached_dae)
+                    working_glb = cached_m3.get("glb_path") or ""
+                    cached_dae = cached_m3.get("dae_path") or ""
+
+                    if working_glb and Path(working_glb).is_file():
+                        # Fast path 1: cached glb path still valid.
+                        pass
+                    else:
+                        hit = _cache.lookup(job.rvt_path, job.mode)
+                        if hit and hit.glb_path and hit.glb_path.is_file():
+                            # Fast path 2: cache-dir GLB exists. Re-point.
+                            cached_m3["glb_path"] = str(hit.glb_path)
+                            if hit.dae_path:
+                                cached_m3["dae_path"] = str(hit.dae_path)
+                            cached["module3"] = cached_m3
+                        elif hit and hit.dae_path and hit.dae_path.is_file():
+                            # Slow path: regenerate from cache-dir DAE,
+                            # then promote the new GLB into the cache so
+                            # next time falls into fast path 2.
+                            job.emit("Refreshing 3D preview from cached DAE…")
+                            new_m3 = module3_3d_preview.run(str(hit.dae_path))
+                            cached["module3"] = new_m3
+                            new_glb = new_m3.get("glb_path")
+                            if new_glb and Path(new_glb).is_file():
+                                _cache.update_glb(job.rvt_path, job.mode, new_glb)
+                        # else: no DAE available either — leave module3
+                        # alone; the 3D tab will show "preview unavailable"
+                        # but the rest of the cached result is intact.
                 except Exception as e:
                     job.emit(f"(M3 refresh on cache-hit failed: {e})")
                 # Audit dump still happens so /api/last_result works.

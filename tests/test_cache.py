@@ -300,3 +300,39 @@ def test_v1_cache_is_invalidated(tmp_rvt, tmp_path, monkeypatch):
         "dae_path": "",
     }))
     assert cache.lookup(str(tmp_rvt), "default") is None
+
+
+def test_update_glb_promotes_into_existing_cache(tmp_rvt, tmp_path, monkeypatch):
+    """A regenerated GLB should be promoted into the cache and its path
+    written back into the sidecar so the next hit is free."""
+    monkeypatch.setattr(cache, "_current_ddc_version", lambda: "test-1.0")
+    # Seed an existing cache entry with empty glb_path.
+    _write_cache_files(tmp_rvt, "standard")
+    new_glb = tmp_path / "regenerated.glb"
+    new_glb.write_bytes(b"glTF" + b"FRESH_GLB_PAYLOAD")
+
+    result = cache.update_glb(str(tmp_rvt), "standard", str(new_glb))
+
+    assert result is not None
+    assert result.is_file()
+    # Sidecar should now record the cache-dir copy.
+    sidecar = tmp_rvt.parent / ".qsforge-cache" / f"{tmp_rvt.stem}_standard.cache.json"
+    data = json.loads(sidecar.read_text())
+    assert data["glb_path"] == str(result)
+    # The cache-dir copy must match the source bytes.
+    assert result.read_bytes() == new_glb.read_bytes()
+
+
+def test_update_glb_returns_none_when_no_cache(tmp_rvt, tmp_path):
+    """update_glb should silently no-op if there's no sidecar to update."""
+    new_glb = tmp_path / "regenerated.glb"
+    new_glb.write_bytes(b"glTF" + b"payload")
+    # No cache entry seeded for this rvt.
+    assert cache.update_glb(str(tmp_rvt), "standard", str(new_glb)) is None
+
+
+def test_update_glb_returns_none_when_source_missing(tmp_rvt, tmp_path, monkeypatch):
+    """update_glb should not crash when the source GLB file is gone."""
+    monkeypatch.setattr(cache, "_current_ddc_version", lambda: "test-1.0")
+    _write_cache_files(tmp_rvt, "standard")
+    assert cache.update_glb(str(tmp_rvt), "standard", str(tmp_path / "does_not_exist.glb")) is None

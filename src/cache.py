@@ -243,6 +243,48 @@ def store_xlsx_only(rvt_path: str, ddc_mode: str, xlsx_path: str) -> None:
         raise
 
 
+def update_glb(rvt_path: str, ddc_mode: str, glb_path: str) -> Optional[Path]:
+    """Promote a freshly-generated GLB into an existing cache entry.
+
+    Used on cache-hit when the cache's xlsx+dae are still good but no GLB
+    was cached (e.g. because Module 3 failed when the entry was first
+    created on a build with broken trimesh — see 1.0.2 retrospective).
+    We copy the new GLB into the cache dir and rewrite the sidecar's
+    ``glb_path`` field so the *next* cache hit can serve it without any
+    trimesh re-conversion.
+
+    Best-effort: silently returns ``None`` on any failure rather than
+    breaking the cache hit. The caller still has the regenerated GLB at
+    its original path; we're just trying to make future hits faster.
+    """
+    rvt = Path(rvt_path).resolve()
+    src_glb = Path(glb_path)
+    if not rvt.is_file() or not src_glb.is_file():
+        return None
+    meta_p = _meta_path(rvt_path, ddc_mode)
+    if not meta_p.is_file():
+        return None
+    try:
+        data = json.loads(meta_p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    cache_dir = _cache_dir(rvt_path)
+    cache_dir.mkdir(exist_ok=True)
+    base = rvt.stem
+    dst_glb = cache_dir / f"{base}_{ddc_mode}.glb"
+    try:
+        if src_glb.resolve() != dst_glb.resolve():
+            shutil.copy2(src_glb, dst_glb)
+        data["glb_path"] = str(dst_glb)
+        meta_p.write_text(
+            json.dumps(data, indent=2), encoding="utf-8"
+        )
+        return dst_glb
+    except Exception:
+        return None
+
+
 def _result_path(rvt_path: str | Path, ddc_mode: str) -> Path:
     base = Path(rvt_path).stem
     return _cache_dir(rvt_path) / f"{base}_{ddc_mode}.result.json"
