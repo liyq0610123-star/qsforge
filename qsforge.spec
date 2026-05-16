@@ -34,11 +34,26 @@ datas = [
     (str(PROJECT / "THIRD-PARTY-NOTICES.md"), "."),
 ]
 datas += collect_data_files("reportlab")
+# pycollada ships its COLLADA XSD (schema-1.4.1.xml) as package data. Without
+# this, trimesh's pycollada-backed DAE loader raises FileNotFoundError at
+# runtime in the frozen build — Module 3 silently falls back to "preview
+# unavailable" (caught the hard way during 1.0.1 testing). collect_data_files
+# walks the installed pycollada package and bundles every non-.py file.
+datas += collect_data_files("pycollada")
+# trimesh has its own resource bundle (.json shaders, example primitives,
+# etc.). Most aren't on the DAE→GLB code path but bundling them costs <1 MB
+# and removes a class of "works in dev, breaks in frozen" surprises.
+datas += collect_data_files("trimesh")
 
 hiddenimports = []
 hiddenimports += collect_submodules("webview.platforms")
 hiddenimports += collect_submodules("reportlab.pdfbase")
 hiddenimports += collect_submodules("pandas")
+# trimesh imports its format backends lazily based on the input file
+# extension, so PyInstaller's static analysis misses most of them.
+# collect_submodules walks every importable submodule. Same for pycollada.
+hiddenimports += collect_submodules("trimesh")
+hiddenimports += collect_submodules("pycollada")
 hiddenimports += [
     "webview.platforms.edgechromium",
     "webview.platforms.winforms",
@@ -50,11 +65,6 @@ hiddenimports += [
     "pandas._libs.tslibs.timedeltas",
     "pandas._libs.skiplist",
     "waitress",
-    "trimesh",
-    "trimesh.exchange",
-    "trimesh.exchange.gltf",
-    "trimesh.exchange.dae",
-    "pycollada",
 ]
 
 block_cipher = None

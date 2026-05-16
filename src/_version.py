@@ -31,7 +31,7 @@ import os
 # "qsforge.version" field at update-check time. Stick to MAJOR.MINOR.PATCH —
 # the comparator tolerates trailing pre-release tags like "1.0.0-rc1" but
 # treats them as equal to the same MAJOR.MINOR.PATCH for ordering purposes.
-QSFORGE_VERSION = "1.0.1"
+QSFORGE_VERSION = "1.0.2"
 
 # Version of DDC that is currently bundled inside this build's
 # ``vendor\ddc\`` folder. Written into ``vendor\ddc\.qsforge-ddc-version``
