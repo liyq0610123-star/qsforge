@@ -718,16 +718,24 @@ export class Viewer3D {
     const fov = (this.camera.fov * Math.PI) / 180;
     const dist = radius / Math.sin(fov / 2);
 
-    // Pick a viewing direction that won't look edge-on at flat models.
-    // Many Revit detail/coordination DAEs are mostly horizontal slabs with
-    // tiny vertical extent — viewing those at an isometric angle makes them
-    // disappear. If Y (vertical, after Z-up→Y-up rotation) is < 25% of the
-    // largest horizontal dimension, switch to a steeper top-down view.
+    // Pick a viewing direction that gives a clear "above the corner" first
+    // impression for architectural models. The previous (1, 0.7, 1) default
+    // worked for typical squat buildings but on tall or elongated models it
+    // produced a near-side-elevation view that users read as "the building
+    // is rotated wrong" — even though orbiting from there gave a perfectly
+    // good view.
+    //
+    // (1, 1.2, 1) gives ~50° camera elevation — recognisably isometric,
+    // still shows two faces + roof, makes vertical extent visually dominant
+    // so "up is up" is unambiguous on first frame.
+    //
+    // Flat/horizontal-slab DAEs (e.g. detail coordination exports) still
+    // need a steeper near-top-down view or the model collapses to a line.
     const horizMax = Math.max(size.x, size.z);
     const isFlat = size.y < horizMax * 0.25;
     const dir = isFlat
       ? new THREE.Vector3(0.5, 1.0, 0.5).normalize()  // mostly top-down, slight perspective
-      : new THREE.Vector3(1, 0.7, 1).normalize();      // standard isometric-ish
+      : new THREE.Vector3(1, 1.2, 1).normalize();      // bird's-eye isometric, ~50° elevation
 
     this.camera.position.copy(center).addScaledVector(dir, dist * 1.5);
     this.camera.near = Math.max(0.01, dist / 1000);
