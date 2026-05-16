@@ -382,14 +382,18 @@ export class Viewer3D {
           console.log('[Viewer3D] GLTFLoader callback entered. gltf keys:', Object.keys(gltf || {}));
           try {
             console.log('[Viewer3D] gltf.scene type:', typeof gltf.scene, 'children:', gltf.scene && gltf.scene.children && gltf.scene.children.length);
-            // glTF scenes are Y-up by spec — no manual reparenting / matrix
-            // baking is needed (ColladaLoader required that hack because it
-            // put unit-scale and Z-up→Y-up rotation on ancestor groups, which
-            // got applied twice at render time). GLTFLoader hands us a scene
-            // we can drop straight into modelGroup.
+            // glTF spec defines Y as up, but DDC's source DAE is Z-up and
+            // trimesh's GLB exporter preserves the original axes verbatim
+            // (no <up_axis> normalisation). Rotate the loaded scene -90° on
+            // X to map Z-up → Y-up so the building renders right-side-up.
+            // We do this on the load callback rather than baking it into
+            // every vertex on the Python side so we don't re-run trimesh
+            // for orientation tweaks; the rotation is one matrix on a
+            // single root Object3D and costs nothing at render time.
+            gltf.scene.rotation.x = -Math.PI / 2;
             this.modelGroup.add(gltf.scene);
             this.modelGroup.updateMatrixWorld(true);
-            console.log('[Viewer3D] scene added to modelGroup');
+            console.log('[Viewer3D] scene added to modelGroup (Z-up→Y-up rotation applied)');
 
             // DIAGNOSTIC PASS: count what's actually in the scene by type,
             // sample first 3 meshes' geometry data, and force every
